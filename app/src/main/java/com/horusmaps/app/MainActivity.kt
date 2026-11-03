@@ -96,36 +96,37 @@ private fun SplashScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Navy, Color(0xFF074B9A)))),
+            .background(Color(0xFFFCFDFF)),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 modifier = Modifier
-                    .size(188.dp)
+                    .size(220.dp)
                     .scale(logoScale.value)
-                    .alpha(logoAlpha.value),
+                    .alpha(logoAlpha.value)
+                    .background(Color.White, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
                     painter = painterResource(R.drawable.horus_logo),
                     contentDescription = "Horus Maps logo",
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize().padding(4.dp)
                 )
             }
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(20.dp))
             Text(
                 text = "HORUS MAPS",
-                color = Color.White,
-                fontSize = 25.sp,
+                color = Navy,
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 3.sp
+                letterSpacing = 2.sp
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(7.dp))
             Text(
                 text = "The world at your sight",
-                color = Color.White.copy(alpha = 0.72f),
+                color = Color(0xFF667085),
                 fontSize = 14.sp
             )
         }
