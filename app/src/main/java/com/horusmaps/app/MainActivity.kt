@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,6 +79,18 @@ private val Blue = Color(0xFF0879D8)
 private val Cyan = Color(0xFF25C8E8)
 private val Ice = Color(0xFFF4F9FF)
 
+private val HorusColorScheme = lightColorScheme(
+    primary = Blue,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFEAF7FC),
+    secondary = Cyan,
+    tertiary = Navy,
+    background = Color(0xFFF8FAFC),
+    surface = Color.White,
+    onBackground = Navy,
+    onSurface = Navy
+)
+
 private enum class AppScreen {
     Splash,
     Welcome,
@@ -103,7 +116,7 @@ class MainActivity : ComponentActivity() {
                 currentScreen = AppScreen.Welcome
             }
 
-            MaterialTheme {
+            MaterialTheme(colorScheme = HorusColorScheme) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         Crossfade(
@@ -326,13 +339,38 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit) {
 private data class Country(val name: String, val dialCode: String)
 
 private val countries = listOf(
-    Country("الأردن", "+962"), Country("الإمارات العربية المتحدة", "+971"), Country("البحرين", "+973"),
-    Country("الجزائر", "+213"), Country("السعودية", "+966"), Country("السودان", "+249"), Country("العراق", "+964"),
-    Country("الكويت", "+965"), Country("المغرب", "+212"), Country("اليمن", "+967"), Country("تونس", "+216"),
-    Country("سوريا", "+963"), Country("عمان", "+968"), Country("فلسطين", "+970"), Country("قطر", "+974"),
-    Country("لبنان", "+961"), Country("ليبيا", "+218"), Country("مصر", "+20"), Country("موريتانيا", "+222"),
-    Country("الصومال", "+252"), Country("جيبوتي", "+253"), Country("جزر القمر", "+269")
-).sortedBy { it.name }
+    Country("أفغانستان", "+93"), Country("ألبانيا", "+355"), Country("الجزائر", "+213"), Country("أندورا", "+376"),
+    Country("أنغولا", "+244"), Country("الأرجنتين", "+54"), Country("أرمينيا", "+374"), Country("أستراليا", "+61"),
+    Country("النمسا", "+43"), Country("أذربيجان", "+994"), Country("البحرين", "+973"), Country("بنغلاديش", "+880"),
+    Country("بيلاروسيا", "+375"), Country("بلجيكا", "+32"), Country("بنين", "+229"), Country("بوليفيا", "+591"),
+    Country("البرازيل", "+55"), Country("بلغاريا", "+359"), Country("الكاميرون", "+237"), Country("كندا", "+1"),
+    Country("تشاد", "+235"), Country("تشيلي", "+56"), Country("الصين", "+86"), Country("كولومبيا", "+57"),
+    Country("جزر القمر", "+269"), Country("الكونغو", "+242"), Country("كوستاريكا", "+506"), Country("كرواتيا", "+385"),
+    Country("كوبا", "+53"), Country("قبرص", "+357"), Country("التشيك", "+420"), Country("الدنمارك", "+45"),
+    Country("جيبوتي", "+253"), Country("جمهورية الدومينيكان", "+1"), Country("الإكوادور", "+593"), Country("مصر", "+20"),
+    Country("السلفادور", "+503"), Country("إستونيا", "+372"), Country("إثيوبيا", "+251"), Country("فنلندا", "+358"),
+    Country("فرنسا", "+33"), Country("جورجيا", "+995"), Country("ألمانيا", "+49"), Country("غانا", "+233"),
+    Country("اليونان", "+30"), Country("غواتيمالا", "+502"), Country("غينيا", "+224"), Country("الهند", "+91"),
+    Country("إندونيسيا", "+62"), Country("إيران", "+98"), Country("العراق", "+964"), Country("أيرلندا", "+353"),
+    Country("إيطاليا", "+39"), Country("اليابان", "+81"), Country("الأردن", "+962"), Country("كازاخستان", "+7"),
+    Country("كينيا", "+254"), Country("الكويت", "+965"), Country("لبنان", "+961"), Country("ليبيا", "+218"),
+    Country("لوكسمبورغ", "+352"), Country("مدغشقر", "+261"), Country("ماليزيا", "+60"), Country("المالديف", "+960"),
+    Country("مالي", "+223"), Country("مالطا", "+356"), Country("موريتانيا", "+222"), Country("المغرب", "+212"),
+    Country("المكسيك", "+52"), Country("مولدوفا", "+373"), Country("موناكو", "+377"), Country("منغوليا", "+976"),
+    Country("الجبل الأسود", "+382"), Country("ميانمار", "+95"), Country("ناميبيا", "+264"), Country("نيبال", "+977"),
+    Country("هولندا", "+31"), Country("نيوزيلندا", "+64"), Country("نيجيريا", "+234"), Country("كوريا الشمالية", "+850"),
+    Country("النرويج", "+47"), Country("عمان", "+968"), Country("باكستان", "+92"), Country("فلسطين", "+970"),
+    Country("بنما", "+507"), Country("باراغواي", "+595"), Country("بيرو", "+51"), Country("الفلبين", "+63"),
+    Country("بولندا", "+48"), Country("البرتغال", "+351"), Country("قطر", "+974"), Country("رومانيا", "+40"),
+    Country("روسيا", "+7"), Country("السعودية", "+966"), Country("السنغال", "+221"), Country("صربيا", "+381"),
+    Country("سنغافورة", "+65"), Country("سلوفاكيا", "+421"), Country("سلوفينيا", "+386"), Country("الصومال", "+252"),
+    Country("جنوب أفريقيا", "+27"), Country("كوريا الجنوبية", "+82"), Country("جنوب السودان", "+211"), Country("إسبانيا", "+34"),
+    Country("سريلانكا", "+94"), Country("السودان", "+249"), Country("السويد", "+46"), Country("سويسرا", "+41"),
+    Country("سوريا", "+963"), Country("تايلاند", "+66"), Country("تونس", "+216"), Country("تركيا", "+90"),
+    Country("أوغندا", "+256"), Country("أوكرانيا", "+380"), Country("الإمارات العربية المتحدة", "+971"), Country("المملكة المتحدة", "+44"),
+    Country("الولايات المتحدة", "+1"), Country("أوروغواي", "+598"), Country("أوزبكستان", "+998"), Country("فنزويلا", "+58"),
+    Country("فيتنام", "+84"), Country("اليمن", "+967"), Country("زامبيا", "+260"), Country("زيمبابوي", "+263")
+).distinctBy { it.name }.sortedBy { it.name }
 
 private fun passwordScore(password: String): Int {
     var score = 0
@@ -348,15 +386,15 @@ private fun passwordScore(password: String): Int {
 private fun CountryPicker(selected: Country, onSelect: (Country) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(20.dp), color = Color.White) {
-            Column(modifier = Modifier.padding(20.dp).height(520.dp)) {
+        Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            Column(modifier = Modifier.padding(20.dp).height(560.dp)) {
                 Text("اختر الدولة", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Navy)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("بحث عن دولة") })
                 Spacer(Modifier.height(10.dp))
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     countries.filter { it.name.contains(query.trim(), ignoreCase = true) }.forEach { country ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable { onSelect(country); onDismiss() }.padding(vertical = 13.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth().clickable { onSelect(country); onDismiss() }.padding(horizontal = 4.dp, vertical = 14.dp)) {
                             Text(country.name, modifier = Modifier.weight(1f), color = Navy)
                             Text(country.dialCode, color = Blue, fontWeight = FontWeight.Bold)
                         }
@@ -375,10 +413,12 @@ private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, on
     var country by remember { mutableStateOf(countries.first { it.name == "مصر" }) }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
+    var confirmPassword by remember { mutableStateOf("") }
+    var showConfirmPassword by remember { mutableStateOf(false) }
     var accepted by remember { mutableStateOf(false) }
     var showCountryPicker by remember { mutableStateOf(false) }
     val score = passwordScore(password)
-    val canContinue = firstName.trim().length >= 2 && familyName.trim().length >= 2 && score >= 3 && accepted
+    val canContinue = firstName.trim().length >= 2 && familyName.trim().length >= 2 && score >= 3 && confirmPassword == password && confirmPassword.isNotEmpty() && accepted
     val pageAlpha = remember { Animatable(0f) }
     val pageOffset = remember { Animatable(28f) }
 
@@ -450,6 +490,31 @@ private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, on
                 )
                 Spacer(Modifier.height(10.dp))
                 PasswordStrength(password, score)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    label = { Text("تأكيد كلمة المرور") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    isError = confirmPassword.isNotEmpty() && confirmPassword != password,
+                    visualTransformation = if (showConfirmPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { showConfirmPassword = !showConfirmPassword }) {
+                            Icon(
+                                imageVector = if (showConfirmPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (showConfirmPassword) "إخفاء تأكيد كلمة المرور" else "إظهار تأكيد كلمة المرور",
+                                tint = Color(0xFF667085)
+                            )
+                        }
+                    }
+                )
+                if (confirmPassword.isNotEmpty() && confirmPassword != password) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("كلمتا المرور غير متطابقتين", color = Color(0xFFD92D20), fontSize = 13.sp)
+                }
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
                     Checkbox(checked = accepted, onCheckedChange = { accepted = it })
@@ -499,18 +564,33 @@ private fun HorusEmailScreen(accountName: String, onContinue: () -> Unit, onBack
 
 @Composable
 private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
-    var started by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { delay(250); started = true }
-    val alpha = remember { Animatable(0f) }
-    LaunchedEffect(started) { if (started) alpha.animateTo(1f, tween(700)) }
-    Box(Modifier.fillMaxSize().background(Color(0xFFF8FBFF)).padding(24.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.alpha(alpha.value)) {
-            Image(painterResource(R.drawable.horus_logo), null, modifier = Modifier.size(140.dp))
-            Spacer(Modifier.height(24.dp))
-            Text("تم إنشاء حسابك بنجاح", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Navy, textAlign = TextAlign.Center)
+    val contentAlpha = remember { Animatable(0f) }
+    val contentScale = remember { Animatable(0.94f) }
+    LaunchedEffect(Unit) {
+        contentAlpha.animateTo(1f, tween(650))
+        contentScale.animateTo(1f, tween(650, easing = FastOutSlowInEasing))
+    }
+    Box(
+        Modifier.fillMaxSize().background(Color(0xFFF6FBFF)).padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.alpha(contentAlpha.value).scale(contentScale.value)
+        ) {
+            Box(Modifier.size(112.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) {
+                Image(painterResource(R.drawable.horus_logo), "شعار Horus Maps", Modifier.fillMaxSize().padding(12.dp))
+            }
+            Spacer(Modifier.height(28.dp))
+            Box(Modifier.size(54.dp).background(Color(0xFFE8F7FC), CircleShape), contentAlignment = Alignment.Center) {
+                Text("✓", color = Blue, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(18.dp))
+            Text("تم إنشاء حسابك بنجاح", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy, textAlign = TextAlign.Center)
             Spacer(Modifier.height(10.dp))
-            Text("مرحبًا بك يا $accountName", fontSize = 18.sp, color = Blue, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(32.dp)); Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp)) { Text("فتح لوحة التحكم", fontWeight = FontWeight.Bold) }
+            Text("أنت الآن جاهز لبدء رحلتك معنا، يا $accountName", fontSize = 16.sp, color = Color(0xFF667085), textAlign = TextAlign.Center)
+            Spacer(Modifier.height(36.dp))
+            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp)) { Text("استكشف Horus Maps", fontWeight = FontWeight.Bold) }
         }
     }
 }
