@@ -64,6 +64,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -96,6 +97,16 @@ private val HorusColorScheme = lightColorScheme(
     onSurface = Navy
 )
 
+private data class AccountDraft(
+    val firstName: String = "",
+    val lastName: String = "",
+    val phone: String = "",
+    val country: String = "",
+    val dialCode: String = "",
+    val password: String = "",
+    val confirmPassword: String = ""
+)
+
 private enum class AppScreen {
     Splash,
     Welcome,
@@ -115,14 +126,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             var currentScreen by remember { mutableStateOf(AppScreen.Splash) }
             var accountName by remember { mutableStateOf("") }
+            var accountDraft by remember { mutableStateOf(AccountDraft()) }
+            val context = LocalContext.current
+            val deviceArabic = java.util.Locale.getDefault().language == "ar"
 
             LaunchedEffect(Unit) {
                 delay(5_000)
-                currentScreen = AppScreen.Welcome
+                val preferences = context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE)
+                val savedName = preferences.getString("account_name", "") ?: ""
+                accountName = savedName
+                currentScreen = if (savedName.isNotBlank()) AppScreen.Dashboard else AppScreen.Welcome
             }
 
             MaterialTheme(colorScheme = HorusColorScheme) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                CompositionLocalProvider(LocalLayoutDirection provides if (deviceArabic) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         Crossfade(
                             targetState = currentScreen,
@@ -131,12 +148,19 @@ class MainActivity : ComponentActivity() {
                         ) { screen ->
                             when (screen) {
                                 AppScreen.Splash -> SplashScreen()
-                                AppScreen.Welcome -> WelcomeScreen(onCreateAccount = { currentScreen = AppScreen.CreateAccount })
-                                AppScreen.CreateAccount -> CreateAccountScreen(onNext = { accountName = it; currentScreen = AppScreen.HorusEmail }, onBack = { currentScreen = AppScreen.Welcome }, onTerms = { currentScreen = AppScreen.Terms }, onPrivacy = { currentScreen = AppScreen.Privacy })
-                                AppScreen.HorusEmail -> HorusEmailScreen(accountName = accountName, onContinue = { currentScreen = AppScreen.Success }, onBack = { currentScreen = AppScreen.CreateAccount })
-                                AppScreen.Success -> SuccessScreen(accountName = accountName, onContinue = { currentScreen = AppScreen.Dashboard })
+                                AppScreen.Welcome -> WelcomeScreen(onCreateAccount = { currentScreen = AppScreen.CreateAccount }, onLogin = { currentScreen = AppScreen.Login })
+                                AppScreen.CreateAccount -> CreateAccountScreen(onNext = { draft ->
+                                    accountDraft = draft
+                                    accountName = "${draft.firstName} ${draft.lastName}"
+                                    currentScreen = AppScreen.HorusEmail
+                                }, onBack = { currentScreen = AppScreen.Welcome }, onTerms = { currentScreen = AppScreen.Terms }, onPrivacy = { currentScreen = AppScreen.Privacy })
+                                AppScreen.HorusEmail -> HorusEmailScreen(draft = accountDraft, onContinue = { currentScreen = AppScreen.Success }, onBack = { currentScreen = AppScreen.CreateAccount })
+                                AppScreen.Success -> SuccessScreen(accountName = accountName, onContinue = {
+                                    context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).edit().putString("account_name", accountName).apply()
+                                    currentScreen = AppScreen.Dashboard
+                                })
                                 AppScreen.Dashboard -> DashboardScreen(accountName = accountName)
-                                AppScreen.Login -> LoginPlaceholderScreen(onBack = { currentScreen = AppScreen.Welcome })
+                                AppScreen.Login -> LoginScreen(onBack = { currentScreen = AppScreen.Welcome }, onLoginSuccess = { name -> accountName = name; currentScreen = AppScreen.Dashboard }, onCreateAccount = { currentScreen = AppScreen.CreateAccount })
                                 AppScreen.Terms -> LegalScreen(title = "شروط الاستخدام", onBack = { currentScreen = AppScreen.CreateAccount })
                                 AppScreen.Privacy -> LegalScreen(title = "سياسة الخصوصية", onBack = { currentScreen = AppScreen.CreateAccount })
                             }
@@ -227,7 +251,7 @@ private fun SplashMark() {
 }
 
 @Composable
-private fun WelcomeScreen(onCreateAccount: () -> Unit) {
+private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
     val logoAlpha = remember { Animatable(0f) }
     val logoScale = remember { Animatable(0.88f) }
     val contentAlpha = remember { Animatable(0f) }
@@ -317,7 +341,7 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit) {
                 }
 
                 OutlinedButton(
-                    onClick = { },
+                    onClick = onLogin,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().height(54.dp)
                 ) {
@@ -444,7 +468,7 @@ private fun CountryPicker(selected: Country, onSelect: (Country) -> Unit, onDism
 }
 
 @Composable
-private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, onTerms: () -> Unit, onPrivacy: () -> Unit) {
+private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Unit, onTerms: () -> Unit, onPrivacy: () -> Unit) {
     var firstName by remember { mutableStateOf("") }
     var familyName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
@@ -583,8 +607,11 @@ private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, on
                     }
                 }
                 Spacer(Modifier.height(18.dp))
-                Button(onClick = { onNext("${firstName.trim()} ${familyName.trim()}") }, enabled = canContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Blue, disabledContainerColor = Color(0xFFD0D5DD))) { Text("متابعة إلى البريد Horus", fontWeight = FontWeight.Bold) }
+                Button(onClick = {
+                    onNext(AccountDraft(firstName.trim(), familyName.trim(), phone, country.name, country.dialCode, password, confirmPassword))
+                }, enabled = canContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Blue, disabledContainerColor = Color(0xFFD0D5DD))) { Text("متابعة إلى البريد Horus", fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.height(22.dp))
+                TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("لديك حساب؟ تسجيل الدخول") }
             }
         }
     }
@@ -598,8 +625,11 @@ private fun PasswordStrength(password: String, score: Int) {
 }
 
 @Composable
-private fun HorusEmailScreen(accountName: String, onContinue: () -> Unit, onBack: () -> Unit) {
+private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack: () -> Unit) {
     var handle by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val accountName = "${draft.firstName} ${draft.lastName}"
     var checked by remember { mutableStateOf(false) }
     val available = checked && handle.matches(Regex("^[a-zA-Z][a-zA-Z0-9._]{2,19}$")) && handle.lowercase() != "admin"
     LaunchedEffect(handle) { checked = false; delay(600); checked = handle.length >= 3 }
@@ -610,8 +640,58 @@ private fun HorusEmailScreen(accountName: String, onContinue: () -> Unit, onBack
             OutlinedTextField(value = handle, onValueChange = { handle = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '.' || char == '_' } }, modifier = Modifier.fillMaxWidth(), singleLine = true, suffix = { Text("@horus.com") }, label = { Text("اسم البريد") })
             Spacer(Modifier.height(12.dp))
             Text(if (!checked) "" else if (available) "هذا الاسم متاح" else "لا يمكن استخدام هذا الاسم", color = if (available) Color(0xFF12B76A) else Color(0xFFD92D20))
+            if (error.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(error, color = Color(0xFFD92D20), fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
             Spacer(Modifier.height(28.dp))
-            Button(onClick = onContinue, enabled = available, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp)) { Text("متابعة", fontWeight = FontWeight.Bold) }
+            Button(
+                onClick = {
+                    loading = true
+                    error = ""
+                    Thread {
+                        runCatching {
+                            val connection = java.net.URL("https://horus-maps.horus-egypt-company.workers.dev/api/auth/register")
+                                .openConnection() as java.net.HttpURLConnection
+                            connection.requestMethod = "POST"
+                            connection.doOutput = true
+                            connection.connectTimeout = 15_000
+                            connection.readTimeout = 15_000
+                            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                            val payload = org.json.JSONObject()
+                                .put("firstName", draft.firstName)
+                                .put("lastName", draft.lastName)
+                                .put("phone", draft.phone)
+                                .put("country", draft.country)
+                                .put("dialCode", draft.dialCode)
+                                .put("emailHandle", handle)
+                                .put("password", draft.password)
+                                .put("confirmPassword", draft.confirmPassword)
+                            connection.outputStream.use { it.write(payload.toString().toByteArray()) }
+                            val response = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+                            org.json.JSONObject(response.bufferedReader().readText())
+                        }.onSuccess { result ->
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                loading = false
+                                if (result.optBoolean("ok")) onContinue()
+                                else error = when (result.optString("error")) {
+                                    "email_taken" -> "اسم البريد مستخدم بالفعل"
+                                    "invalid_password" -> "كلمة المرور لا تستوفي مستوى الحماية المطلوب"
+                                    else -> "تعذر إنشاء الحساب، حاول مرة أخرى"
+                                }
+                            }
+                        }.onFailure {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                loading = false
+                                error = "تعذر الاتصال بالخادم. تحقق من الإنترنت ثم حاول مرة أخرى"
+                            }
+                        }
+                    }.start()
+                },
+                enabled = available && !loading,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text(if (loading) "جارٍ إنشاء الحساب..." else "إنشاء الحساب", fontWeight = FontWeight.Bold) }
             TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("العودة") }
         }
     }
@@ -662,8 +742,108 @@ private fun DashboardScreen(accountName: String) {
 }
 
 @Composable
-private fun LoginPlaceholderScreen(onBack: () -> Unit) {
-    LegalScreen("تسجيل الدخول", onBack)
+private fun LoginScreen(onBack: () -> Unit, onLoginSuccess: (String) -> Unit, onCreateAccount: () -> Unit) {
+    var handle by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val pageAlpha = remember { Animatable(0f) }
+    val pageOffset = remember { Animatable(24f) }
+
+    LaunchedEffect(Unit) {
+        pageAlpha.animateTo(1f, tween(500))
+        pageOffset.animateTo(0f, tween(500, easing = FastOutSlowInEasing))
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFFF8FAFC))) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)
+                .graphicsLayer { alpha = pageAlpha.value; translationY = pageOffset.value }
+        ) {
+            Spacer(Modifier.height(20.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBack) { Text("العودة", color = Navy, fontWeight = FontWeight.SemiBold) }
+                Spacer(Modifier.weight(1f))
+                Image(painterResource(R.drawable.horus_logo), null, Modifier.size(44.dp))
+            }
+            Spacer(Modifier.height(38.dp))
+            Text("تسجيل الدخول", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Navy)
+            Spacer(Modifier.height(6.dp))
+            Text("أدخل بريد Horus Maps وكلمة مرورك للمتابعة.", color = Color(0xFF667085), fontSize = 15.sp)
+            Spacer(Modifier.height(30.dp))
+            OutlinedTextField(
+                value = handle,
+                onValueChange = { handle = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '.' || char == '_' } },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                suffix = { Text("@horus.com", color = Color(0xFF667085)) },
+                label = { Text("بريد Horus Maps") }
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                label = { Text("كلمة المرور") },
+                trailingIcon = {
+                    IconButton(onClick = { showPassword = !showPassword }) {
+                        Icon(if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (showPassword) "إخفاء كلمة المرور" else "إظهار كلمة المرور", tint = Color(0xFF667085))
+                    }
+                }
+            )
+            if (error.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(error, color = Color(0xFFD92D20), fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(28.dp))
+            Button(
+                onClick = {
+                    error = ""
+                    loading = true
+                    val email = "${handle}@horus.com"
+                    Thread {
+                        runCatching {
+                            val connection = java.net.URL("https://horus-maps.horus-egypt-company.workers.dev/api/auth/login")
+                                .openConnection() as java.net.HttpURLConnection
+                            connection.requestMethod = "POST"
+                            connection.doOutput = true
+                            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                            connection.outputStream.use { it.write(org.json.JSONObject().put("email", email).put("password", password).toString().toByteArray()) }
+                            val response = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+                            org.json.JSONObject(response.bufferedReader().readText())
+                        }.onSuccess { result ->
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                loading = false
+                                if (result.optBoolean("ok")) {
+                                    val name = result.optJSONObject("user")?.optString("name") ?: handle
+                                    context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).edit()
+                                        .putString("account_name", name).putString("account_email", email).apply()
+                                    onLoginSuccess(name)
+                                } else error = when (result.optString("error")) { "invalid_credentials" -> "البريد أو كلمة المرور غير صحيحة" else -> "تعذر تسجيل الدخول، حاول مرة أخرى" }
+                            }
+                        }.onFailure {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post { loading = false; error = "تعذر الاتصال بالخادم" }
+                        }
+                    }.start()
+                },
+                enabled = !loading && handle.length >= 3 && password.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text(if (loading) "جارٍ تسجيل الدخول..." else "تسجيل الدخول", fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Text("ليس لديك حساب؟ ", color = Color(0xFF667085))
+                Text("إنشاء حساب", color = Blue, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onCreateAccount))
+            }
+        }
+    }
 }
 
 @Composable
@@ -690,7 +870,7 @@ private fun SplashScreenPreview() {
 private fun WelcomeScreenPreview() {
     MaterialTheme {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-            WelcomeScreen(onCreateAccount = {})
+            WelcomeScreen(onCreateAccount = {}, onLogin = {})
         }
     }
 }

@@ -28,6 +28,19 @@ const passwordScore = password => {
 
 const toBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 
+const fromBase64 = value => Uint8Array.from(atob(value), character => character.charCodeAt(0));
+
+const verifyPassword = async (password, saltBase64, hashBase64) => {
+  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: fromBase64(saltBase64), iterations: 120000, hash: "SHA-256" }, keyMaterial, 256);
+  const expected = fromBase64(hashBase64);
+  const actual = new Uint8Array(derived);
+  if (expected.length !== actual.length) return false;
+  let difference = 0;
+  for (let index = 0; index < expected.length; index++) difference |= expected[index] ^ actual[index];
+  return difference === 0;
+};
+
 const hashPassword = async password => {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const keyMaterial = await crypto.subtle.importKey(
@@ -64,6 +77,18 @@ export default {
       const email = `${handle}@horus.com`;
       const existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
       return json({ available: !existing, email });
+    }
+
+    if (url.pathname === "/api/auth/login" && request.method === "POST") {
+      if (!env.Horus_maps) return json({ error: "database_unconfigured" }, 503);
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const password = String(body.password ?? "");
+      if (!email || !password) return json({ error: "invalid_credentials" }, 400);
+      const user = await env.Horus_maps.prepare("SELECT first_name, last_name, horus_email, password_salt, password_hash FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+      if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) return json({ error: "invalid_credentials" }, 401);
+      return json({ ok: true, user: { name: `${user.first_name} ${user.last_name}`, email: user.horus_email } });
     }
 
     if (url.pathname === "/api/auth/register" && request.method === "POST") {
