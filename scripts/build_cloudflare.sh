@@ -5,12 +5,21 @@ SDK_ROOT="${ANDROID_HOME:-/tmp/android-sdk}"
 export ANDROID_HOME="$SDK_ROOT"
 export ANDROID_SDK_ROOT="$SDK_ROOT"
 
-if ! command -v java >/dev/null 2>&1; then
-  apt-get update -qq
-  apt-get install -y openjdk-17-jdk wget unzip
+JDK_ROOT="/tmp/jdk17"
+
+if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q '17\|21'; then
+  rm -rf /tmp/jdk17.tar.gz "$JDK_ROOT"
+  curl -fsSL "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz" -o /tmp/jdk17.tar.gz
+  mkdir -p "$JDK_ROOT"
+  tar -xzf /tmp/jdk17.tar.gz --strip-components=1 -C "$JDK_ROOT"
 fi
 
-export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
+if [[ -x "$JDK_ROOT/bin/java" ]]; then
+  export JAVA_HOME="$JDK_ROOT"
+else
+  export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
+fi
+export PATH="$JAVA_HOME/bin:$PATH"
 
 if [[ ! -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
   mkdir -p "$SDK_ROOT/cmdline-tools"
