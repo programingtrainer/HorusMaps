@@ -32,6 +32,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -66,6 +68,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import kotlinx.coroutines.delay
 
 private val Navy = Color(0xFF062A6B)
@@ -383,30 +388,30 @@ private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, on
     }
     if (showCountryPicker) CountryPicker(country, { country = it }) { showCountryPicker = false }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFF5F8FC))) {
+    Box(Modifier.fillMaxSize().background(Color(0xFFF8FAFC))) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .graphicsLayer { alpha = pageAlpha.value; translationY = pageOffset.value }
         ) {
-            Box(Modifier.fillMaxWidth().background(Navy).padding(horizontal = 20.dp, vertical = 18.dp)) {
-                Column {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = onBack) { Text("رجوع", color = Color.White.copy(alpha = 0.86f)) }
-                        Spacer(Modifier.weight(1f))
-                        Image(painterResource(R.drawable.horus_logo), null, Modifier.size(38.dp))
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Text("إنشاء حساب جديد", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text("خطوة واحدة لبدء رحلتك مع Horus Maps", color = Color.White.copy(alpha = 0.72f), fontSize = 14.sp)
-                    Spacer(Modifier.height(18.dp))
-                    Box(Modifier.fillMaxWidth().height(5.dp).background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(10.dp))) {
-                        Box(Modifier.fillMaxWidth(0.34f).fillMaxSize().background(Cyan, RoundedCornerShape(10.dp)))
-                    }
+            Box(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onBack) { Text("العودة", color = Navy, fontWeight = FontWeight.SemiBold) }
+                    Spacer(Modifier.weight(1f))
+                    Image(painterResource(R.drawable.horus_logo), null, Modifier.size(44.dp))
                 }
             }
 
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 22.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                Text("أنشئ حسابك", color = Navy, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text("خطوات بسيطة، واستكشف العالم من حولك.", color = Color(0xFF667085), fontSize = 15.sp)
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth().height(3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(Modifier.weight(1f).fillMaxSize().background(Blue, RoundedCornerShape(8.dp)))
+                    Box(Modifier.weight(1f).fillMaxSize().background(Color(0xFFDDE5EF), RoundedCornerShape(8.dp)))
+                    Box(Modifier.weight(1f).fillMaxSize().background(Color(0xFFDDE5EF), RoundedCornerShape(8.dp)))
+                }
+                Spacer(Modifier.height(24.dp))
                 Text("بياناتك الشخصية", color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(value = firstName, onValueChange = { firstName = it.take(30) }, label = { Text("الاسم الأول") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
@@ -424,7 +429,25 @@ private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, on
                 Spacer(Modifier.height(24.dp))
                 Text("حماية حسابك", color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("كلمة المرور") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp), visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), trailingIcon = { Text(if (showPassword) "إخفاء" else "عرض", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable { showPassword = !showPassword }.padding(8.dp)) })
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("كلمة المرور") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { showPassword = !showPassword }) {
+                            Icon(
+                                imageVector = if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (showPassword) "إخفاء كلمة المرور" else "إظهار كلمة المرور",
+                                tint = Color(0xFF667085)
+                            )
+                        }
+                    }
+                )
                 Spacer(Modifier.height(10.dp))
                 PasswordStrength(password, score)
                 Spacer(Modifier.height(16.dp))
