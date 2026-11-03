@@ -19,12 +19,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -70,6 +73,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import kotlinx.coroutines.delay
@@ -385,17 +390,50 @@ private fun passwordScore(password: String): Int {
 @Composable
 private fun CountryPicker(selected: Country, onSelect: (Country) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
+    val normalizedQuery = query.trim().replace(Regex("\\s+"), "")
+    val filteredCountries = if (normalizedQuery.isEmpty()) countries else countries.filter { country ->
+        country.name.replace(Regex("\\s+"), "").contains(normalizedQuery, ignoreCase = true) ||
+            country.dialCode.contains(normalizedQuery)
+    }
+
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-            Column(modifier = Modifier.padding(20.dp).height(560.dp)) {
-                Text("اختر الدولة", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Navy)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("بحث عن دولة") })
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp).padding(horizontal = 8.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp).padding(horizontal = 18.dp, vertical = 16.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("اختر دولتك", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Navy)
+                        Spacer(Modifier.height(4.dp))
+                        Text("جميع الدول مرتبة أبجديًا", color = Color(0xFF667085), fontSize = 13.sp)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Outlined.Close, contentDescription = "إغلاق قائمة الدول", tint = Navy)
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    leadingIcon = { Icon(imageVector = Icons.Outlined.Search, contentDescription = null, tint = Blue) },
+                    placeholder = { Text("ابحث عن الدولة") }
+                )
                 Spacer(Modifier.height(10.dp))
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    countries.filter { it.name.contains(query.trim(), ignoreCase = true) }.forEach { country ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable { onSelect(country); onDismiss() }.padding(horizontal = 4.dp, vertical = 14.dp)) {
-                            Text(country.name, modifier = Modifier.weight(1f), color = Navy)
+                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Top) {
+                    items(filteredCountries, key = { it.name }) { country ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().height(54.dp).clickable {
+                                onSelect(country)
+                                onDismiss()
+                            }.padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(country.name, modifier = Modifier.weight(1f), color = if (country.name == selected.name) Blue else Navy, fontWeight = if (country.name == selected.name) FontWeight.Bold else FontWeight.Normal)
                             Text(country.dialCode, color = Blue, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -464,7 +502,24 @@ private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, on
                     OutlinedTextField(value = phone, onValueChange = { phone = it.filter(Char::isDigit) }, label = { Text("رقم الهاتف (اختياري)") }, modifier = Modifier.weight(1f), singleLine = true, shape = RoundedCornerShape(14.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
                 }
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(value = country.name, onValueChange = {}, readOnly = true, label = { Text("البلد") }, trailingIcon = { Text("⌄", color = Blue) }, modifier = Modifier.fillMaxWidth().clickable { showCountryPicker = true }, shape = RoundedCornerShape(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().clickable(onClick = { showCountryPicker = true })) {
+                    OutlinedTextField(
+                        value = country.name,
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = false,
+                        label = { Text("البلد") },
+                        trailingIcon = { Text("⌄", color = Blue, fontSize = 18.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = Navy,
+                            disabledBorderColor = Color(0xFFB8C0CC),
+                            disabledLabelColor = Color(0xFF667085),
+                            disabledTrailingIconColor = Blue
+                        )
+                    )
+                }
 
                 Spacer(Modifier.height(24.dp))
                 Text("حماية حسابك", color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
