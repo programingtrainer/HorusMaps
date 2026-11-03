@@ -1,6 +1,3 @@
 name = "horus-maps"
 compatibility_date = "2025-11-01"
-
-[assets]
-directory = "./cloudflare-dist"
-not_found_handling = "single-page-application"
+pages_build_output_dir = "./cloudflare-dist"
