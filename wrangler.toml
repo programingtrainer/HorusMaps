@@ -1,3 +1,8 @@
 name = "horus-maps"
+main = "./worker.js"
 compatibility_date = "2025-11-01"
-pages_build_output_dir = "./cloudflare-dist"
+
+[assets]
+directory = "./cloudflare-dist"
+binding = "ASSETS"
+run_worker_first = false
