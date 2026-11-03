@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -95,7 +98,12 @@ private fun SplashScreen() {
                     .alpha(logoAlpha.value),
                 contentAlignment = Alignment.Center
             ) {
-                SplashMark()
+                Image(
+                    painter = painterResource(R.drawable.horus_logo),
+                    contentDescription = "Horus Maps logo",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             Spacer(modifier = Modifier.height(22.dp))
             Text(
@@ -162,7 +170,12 @@ private fun WelcomeScreen() {
                     .background(Color.White, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                SplashMark()
+                Image(
+                    painter = painterResource(R.drawable.horus_logo),
+                    contentDescription = "Horus Maps logo",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             Spacer(modifier = Modifier.height(28.dp))
             Text(
