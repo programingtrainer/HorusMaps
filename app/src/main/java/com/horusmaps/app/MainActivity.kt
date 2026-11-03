@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -100,16 +101,22 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Surface(modifier = Modifier.fillMaxSize()) {
-                        when (currentScreen) {
-                            AppScreen.Splash -> SplashScreen()
-                            AppScreen.Welcome -> WelcomeScreen(onCreateAccount = { currentScreen = AppScreen.CreateAccount })
-                            AppScreen.CreateAccount -> CreateAccountScreen(onNext = { accountName = it; currentScreen = AppScreen.HorusEmail }, onBack = { currentScreen = AppScreen.Welcome }, onTerms = { currentScreen = AppScreen.Terms }, onPrivacy = { currentScreen = AppScreen.Privacy })
-                            AppScreen.HorusEmail -> HorusEmailScreen(accountName = accountName, onContinue = { currentScreen = AppScreen.Success }, onBack = { currentScreen = AppScreen.CreateAccount })
-                            AppScreen.Success -> SuccessScreen(accountName = accountName, onContinue = { currentScreen = AppScreen.Dashboard })
-                            AppScreen.Dashboard -> DashboardScreen(accountName = accountName)
-                            AppScreen.Login -> LoginPlaceholderScreen(onBack = { currentScreen = AppScreen.Welcome })
-                            AppScreen.Terms -> LegalScreen(title = "شروط الاستخدام", onBack = { currentScreen = AppScreen.CreateAccount })
-                            AppScreen.Privacy -> LegalScreen(title = "سياسة الخصوصية", onBack = { currentScreen = AppScreen.CreateAccount })
+                        Crossfade(
+                            targetState = currentScreen,
+                            animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                            label = "screen_transition"
+                        ) { screen ->
+                            when (screen) {
+                                AppScreen.Splash -> SplashScreen()
+                                AppScreen.Welcome -> WelcomeScreen(onCreateAccount = { currentScreen = AppScreen.CreateAccount })
+                                AppScreen.CreateAccount -> CreateAccountScreen(onNext = { accountName = it; currentScreen = AppScreen.HorusEmail }, onBack = { currentScreen = AppScreen.Welcome }, onTerms = { currentScreen = AppScreen.Terms }, onPrivacy = { currentScreen = AppScreen.Privacy })
+                                AppScreen.HorusEmail -> HorusEmailScreen(accountName = accountName, onContinue = { currentScreen = AppScreen.Success }, onBack = { currentScreen = AppScreen.CreateAccount })
+                                AppScreen.Success -> SuccessScreen(accountName = accountName, onContinue = { currentScreen = AppScreen.Dashboard })
+                                AppScreen.Dashboard -> DashboardScreen(accountName = accountName)
+                                AppScreen.Login -> LoginPlaceholderScreen(onBack = { currentScreen = AppScreen.Welcome })
+                                AppScreen.Terms -> LegalScreen(title = "شروط الاستخدام", onBack = { currentScreen = AppScreen.CreateAccount })
+                                AppScreen.Privacy -> LegalScreen(title = "سياسة الخصوصية", onBack = { currentScreen = AppScreen.CreateAccount })
+                            }
                         }
                     }
                 }
@@ -367,40 +374,75 @@ private fun CreateAccountScreen(onNext: (String) -> Unit, onBack: () -> Unit, on
     var showCountryPicker by remember { mutableStateOf(false) }
     val score = passwordScore(password)
     val canContinue = firstName.trim().length >= 2 && familyName.trim().length >= 2 && score >= 3 && accepted
+    val pageAlpha = remember { Animatable(0f) }
+    val pageOffset = remember { Animatable(28f) }
 
+    LaunchedEffect(Unit) {
+        pageAlpha.animateTo(1f, tween(500))
+        pageOffset.animateTo(0f, tween(500, easing = FastOutSlowInEasing))
+    }
     if (showCountryPicker) CountryPicker(country, { country = it }) { showCountryPicker = false }
 
-    Box(Modifier.fillMaxSize().background(Color.White)) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 18.dp)) {
-            Text("إنشاء حساب", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
-            Text("أدخل بياناتك الأساسية للبدء في Horus Maps", color = Color(0xFF667085), modifier = Modifier.padding(top = 6.dp, bottom = 24.dp))
-            OutlinedTextField(value = firstName, onValueChange = { firstName = it }, label = { Text("الاسم الأول") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            Spacer(Modifier.height(14.dp))
-            OutlinedTextField(value = familyName, onValueChange = { familyName = it }, label = { Text("اسم العائلة") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            Spacer(Modifier.height(14.dp))
-            androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()) {
-                OutlinedTextField(value = phone, onValueChange = { phone = it.filter(Char::isDigit) }, label = { Text("رقم الهاتف (اختياري)") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
-                Spacer(Modifier.width(10.dp))
-                Button(onClick = { showCountryPicker = true }, modifier = Modifier.height(56.dp), shape = RoundedCornerShape(12.dp)) { Text(country.dialCode) }
+    Box(Modifier.fillMaxSize().background(Color(0xFFF5F8FC))) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .graphicsLayer { alpha = pageAlpha.value; translationY = pageOffset.value }
+        ) {
+            Box(Modifier.fillMaxWidth().background(Navy).padding(horizontal = 20.dp, vertical = 18.dp)) {
+                Column {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = onBack) { Text("رجوع", color = Color.White.copy(alpha = 0.86f)) }
+                        Spacer(Modifier.weight(1f))
+                        Image(painterResource(R.drawable.horus_logo), null, Modifier.size(38.dp))
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Text("إنشاء حساب جديد", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text("خطوة واحدة لبدء رحلتك مع Horus Maps", color = Color.White.copy(alpha = 0.72f), fontSize = 14.sp)
+                    Spacer(Modifier.height(18.dp))
+                    Box(Modifier.fillMaxWidth().height(5.dp).background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(10.dp))) {
+                        Box(Modifier.fillMaxWidth(0.34f).fillMaxSize().background(Cyan, RoundedCornerShape(10.dp)))
+                    }
+                }
             }
-            Spacer(Modifier.height(14.dp))
-            OutlinedTextField(value = country.name, onValueChange = {}, readOnly = true, label = { Text("البلد") }, trailingIcon = { Text("⌄", color = Blue) }, modifier = Modifier.fillMaxWidth().clickable { showCountryPicker = true })
-            Spacer(Modifier.height(14.dp))
-            OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("كلمة المرور") }, modifier = Modifier.fillMaxWidth(), singleLine = true, visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), trailingIcon = { Text(if (showPassword) "إخفاء" else "عرض", color = Blue, modifier = Modifier.clickable { showPassword = !showPassword }.padding(8.dp)) })
-            Spacer(Modifier.height(10.dp))
-            PasswordStrength(password, score)
-            Spacer(Modifier.height(14.dp))
-            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = accepted, onCheckedChange = { accepted = it })
-                Text("أوافق على ", color = Navy, fontSize = 13.sp)
-                Text("شروط الاستخدام", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onTerms))
-                Text(" و", color = Navy, fontSize = 13.sp)
-                Text("سياسة الخصوصية", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onPrivacy))
+
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 22.dp)) {
+                Text("بياناتك الشخصية", color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = firstName, onValueChange = { firstName = it.take(30) }, label = { Text("الاسم الأول") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = familyName, onValueChange = { familyName = it.take(30) }, label = { Text("اسم العائلة") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { showCountryPicker = true }, modifier = Modifier.width(92.dp).height(56.dp), shape = RoundedCornerShape(14.dp)) { Text(country.dialCode, color = Navy, fontWeight = FontWeight.Bold) }
+                    Spacer(Modifier.width(10.dp))
+                    OutlinedTextField(value = phone, onValueChange = { phone = it.filter(Char::isDigit) }, label = { Text("رقم الهاتف (اختياري)") }, modifier = Modifier.weight(1f), singleLine = true, shape = RoundedCornerShape(14.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = country.name, onValueChange = {}, readOnly = true, label = { Text("البلد") }, trailingIcon = { Text("⌄", color = Blue) }, modifier = Modifier.fillMaxWidth().clickable { showCountryPicker = true }, shape = RoundedCornerShape(14.dp))
+
+                Spacer(Modifier.height(24.dp))
+                Text("حماية حسابك", color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("كلمة المرور") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp), visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), trailingIcon = { Text(if (showPassword) "إخفاء" else "عرض", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable { showPassword = !showPassword }.padding(8.dp)) })
+                Spacer(Modifier.height(10.dp))
+                PasswordStrength(password, score)
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+                    Checkbox(checked = accepted, onCheckedChange = { accepted = it })
+                    Column(Modifier.padding(top = 12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("أوافق على ", color = Navy, fontSize = 13.sp)
+                            Text("شروط الاستخدام", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onTerms))
+                            Text(" و", color = Navy, fontSize = 13.sp)
+                        }
+                        Text("سياسة الخصوصية", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onPrivacy))
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Button(onClick = { onNext("${firstName.trim()} ${familyName.trim()}") }, enabled = canContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Blue, disabledContainerColor = Color(0xFFD0D5DD))) { Text("متابعة إلى البريد Horus", fontWeight = FontWeight.Bold) }
+                Spacer(Modifier.height(22.dp))
             }
-            Spacer(Modifier.height(20.dp))
-            Button(onClick = { onNext("${firstName.trim()} ${familyName.trim()}") }, enabled = canContinue, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp)) { Text("إنشاء الحساب", fontWeight = FontWeight.Bold) }
-            Spacer(Modifier.height(10.dp))
-            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("العودة") }
         }
     }
 }
