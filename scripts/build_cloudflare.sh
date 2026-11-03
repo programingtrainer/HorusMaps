@@ -1,48 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SDK_ROOT="${ANDROID_HOME:-/tmp/android-sdk}"
-export ANDROID_HOME="$SDK_ROOT"
-export ANDROID_SDK_ROOT="$SDK_ROOT"
-
-JDK_ROOT="/tmp/jdk17"
-
-if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q '17\|21'; then
-  rm -rf /tmp/jdk17.tar.gz "$JDK_ROOT"
-  curl -fsSL "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz" -o /tmp/jdk17.tar.gz
-  mkdir -p "$JDK_ROOT"
-  tar -xzf /tmp/jdk17.tar.gz --strip-components=1 -C "$JDK_ROOT"
-fi
-
-if [[ -x "$JDK_ROOT/bin/java" ]]; then
-  export JAVA_HOME="$JDK_ROOT"
-else
-  export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
-fi
-export PATH="$JAVA_HOME/bin:$PATH"
-
-if [[ ! -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]]; then
-  mkdir -p "$SDK_ROOT/cmdline-tools"
-  curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/android-command-tools.zip
-  rm -rf /tmp/android-command-tools
-  unzip -q /tmp/android-command-tools.zip -d /tmp/android-command-tools
-  mv /tmp/android-command-tools/cmdline-tools "$SDK_ROOT/cmdline-tools/latest"
-fi
-
-mkdir -p "$SDK_ROOT/licenses"
-printf '8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n' > "$SDK_ROOT/licenses/android-sdk-license"
-printf '84831b9409646a918e30573bab4c9c91346d8abd\n' >> "$SDK_ROOT/licenses/android-sdk-preview-license"
-
-yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" --licenses >/dev/null
-"$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" \
-  "platform-tools" "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0"
-
-printf 'sdk.dir=%s\n' "$SDK_ROOT" > local.properties
-./gradlew --no-daemon --max-workers=2 :app:assembleDebug
-
 rm -rf cloudflare-dist
 mkdir -p cloudflare-dist
-cp app/build/outputs/apk/debug/app-debug.apk cloudflare-dist/HorusMaps.apk
+cp release-assets/HorusMaps.apk cloudflare-dist/HorusMaps.apk
+
 cat > cloudflare-dist/index.html <<'HTML'
 <!doctype html>
 <html lang="ar" dir="rtl">
