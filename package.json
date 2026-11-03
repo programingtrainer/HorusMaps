@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "build": "bash scripts/build_cloudflare.sh",
-    "deploy": "wrangler deploy",
-    "preview": "wrangler dev"
+    "deploy": "npx wrangler deploy",
+    "preview": "npx wrangler dev"
   },
   "devDependencies": {
     "wrangler": "^4.45.0"
