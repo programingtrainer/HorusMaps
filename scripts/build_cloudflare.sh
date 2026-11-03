@@ -31,9 +31,11 @@ fi
 
 mkdir -p "$SDK_ROOT/licenses"
 printf '8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n' > "$SDK_ROOT/licenses/android-sdk-license"
+printf '84831b9409646a918e30573bab4c9c91346d8abd\n' >> "$SDK_ROOT/licenses/android-sdk-preview-license"
 
+yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" --licenses >/dev/null
 "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" \
-  "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+  "platform-tools" "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0"
 
 printf 'sdk.dir=%s\n' "$SDK_ROOT" > local.properties
 ./gradlew --no-daemon --max-workers=2 :app:assembleDebug

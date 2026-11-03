@@ -1,0 +1,12 @@
+{
+  "name": "horus-maps-deploy",
+  "private": true,
+  "scripts": {
+    "build": "bash scripts/build_cloudflare.sh",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}
