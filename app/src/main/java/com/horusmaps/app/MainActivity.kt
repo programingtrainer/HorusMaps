@@ -153,7 +153,7 @@ class MainActivity : ComponentActivity() {
                                     accountDraft = draft
                                     accountName = "${draft.firstName} ${draft.lastName}"
                                     currentScreen = AppScreen.HorusEmail
-                                }, onBack = { currentScreen = AppScreen.Welcome }, onTerms = { currentScreen = AppScreen.Terms }, onPrivacy = { currentScreen = AppScreen.Privacy })
+                                }, onBack = { currentScreen = AppScreen.Welcome }, onLogin = { currentScreen = AppScreen.Login }, onTerms = { currentScreen = AppScreen.Terms }, onPrivacy = { currentScreen = AppScreen.Privacy })
                                 AppScreen.HorusEmail -> HorusEmailScreen(draft = accountDraft, onContinue = { currentScreen = AppScreen.Success }, onBack = { currentScreen = AppScreen.CreateAccount })
                                 AppScreen.Success -> SuccessScreen(accountName = accountName, onContinue = {
                                     context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).edit().putString("account_name", accountName).apply()
@@ -468,7 +468,7 @@ private fun CountryPicker(selected: Country, onSelect: (Country) -> Unit, onDism
 }
 
 @Composable
-private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Unit, onTerms: () -> Unit, onPrivacy: () -> Unit) {
+private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Unit, onLogin: () -> Unit, onTerms: () -> Unit, onPrivacy: () -> Unit) {
     var firstName by remember { mutableStateOf("") }
     var familyName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
@@ -611,7 +611,7 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                     onNext(AccountDraft(firstName.trim(), familyName.trim(), phone, country.name, country.dialCode, password, confirmPassword))
                 }, enabled = canContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Blue, disabledContainerColor = Color(0xFFD0D5DD))) { Text("متابعة إلى البريد Horus", fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.height(22.dp))
-                TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("لديك حساب؟ تسجيل الدخول") }
+                TextButton(onClick = onLogin, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("لديك حساب؟ تسجيل الدخول") }
             }
         }
     }
