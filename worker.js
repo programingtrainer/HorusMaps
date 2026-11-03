@@ -52,7 +52,7 @@ export default {
     if (request.method === "OPTIONS") return json({ ok: true });
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "horus-maps-api", database: Boolean(env.DB) });
+      return json({ ok: true, service: "horus-maps-api", database: Boolean(env.Horus_maps) });
     }
 
     if (url.pathname === "/api/email/check") {
@@ -60,14 +60,14 @@ export default {
       if (handle.length < 3 || !/^[a-z][a-z0-9._]{2,19}$/.test(handle) || handle === "admin") {
         return json({ available: false, reason: "invalid" });
       }
-      if (!env.DB) return json({ available: false, reason: "database_unconfigured" }, 503);
+      if (!env.Horus_maps) return json({ available: false, reason: "database_unconfigured" }, 503);
       const email = `${handle}@horus.com`;
-      const existing = await env.DB.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+      const existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
       return json({ available: !existing, email });
     }
 
     if (url.pathname === "/api/auth/register" && request.method === "POST") {
-      if (!env.DB) return json({ error: "database_unconfigured" }, 503);
+      if (!env.Horus_maps) return json({ error: "database_unconfigured" }, 503);
       let body;
       try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
@@ -86,7 +86,7 @@ export default {
       if (!/^[a-z][a-z0-9._]{2,19}$/.test(emailHandle) || emailHandle === "admin") return json({ error: "invalid_email" }, 400);
       if (password !== confirmPassword || passwordScore(password) < 3) return json({ error: "invalid_password" }, 400);
 
-      const existing = await env.DB.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+      const existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
       if (existing) return json({ error: "email_taken" }, 409);
 
       const credentials = await hashPassword(password);
@@ -94,7 +94,7 @@ export default {
       const id = crypto.randomUUID();
 
       try {
-        await env.DB.prepare(`INSERT INTO users
+        await env.Horus_maps.prepare(`INSERT INTO users
           (id, first_name, last_name, phone, country, dial_code, horus_email, password_salt, password_hash, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .bind(id, firstName, lastName, phone || null, country, dialCode, email, credentials.salt, credentials.hash, now, now)
