@@ -877,23 +877,55 @@ private fun DashboardScreen(accountName: String) {
         Thread {
             runCatching {
                 val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-                val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=1")
+                val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=1&addressdetails=1&polygon_geojson=1")
                 val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 12000
-                connection.readTimeout = 12000
+                connection.connectTimeout = 15000
+                connection.readTimeout = 20000
                 connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (Android)")
                 val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
                 if (results.length() == 0) throw IllegalStateException("لم يتم العثور على المكان")
-                val result = results.getJSONObject(0)
-                Pair(
-                    org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon")),
-                    result.optString("display_name", query)
-                )
+                results.getJSONObject(0)
             }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     searching = false
-                    searchMessage = result.second
-                    mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(result.first, 14.5))
+                    searchMessage = result.optString("display_name", query)
+                    val map = mapLibreMap
+                    val countryResult = result.optString("addresstype") == "country" ||
+                        result.optString("type") == "country"
+                    val countrySource = map?.style?.getSource("horus-country-source") as? org.maplibre.android.style.sources.GeoJsonSource
+                    if (countryResult) {
+                        val geometry = result.optJSONObject("geojson")
+                        if (geometry != null) {
+                            countrySource?.setGeoJson(geometry.toString())
+                        }
+                        val bbox = result.optJSONArray("boundingbox")
+                        if (bbox != null && bbox.length() >= 4) {
+                            val south = bbox.getString(0).toDouble()
+                            val north = bbox.getString(1).toDouble()
+                            val west = bbox.getString(2).toDouble()
+                            val east = bbox.getString(3).toDouble()
+                            val bounds = org.maplibre.android.geometry.LatLngBounds.Builder()
+                                .include(org.maplibre.android.geometry.LatLng(south, west))
+                                .include(org.maplibre.android.geometry.LatLng(north, east))
+                                .build()
+                            map?.animateCamera(
+                                org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(bounds, 90)
+                            )
+                        } else {
+                            map?.animateCamera(
+                                org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                                    org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon")), 5.0
+                                )
+                            )
+                        }
+                    } else {
+                        countrySource?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf()))
+                        map?.animateCamera(
+                            org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                                org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon")), 14.5
+                            )
+                        )
+                    }
                 }
             }.onFailure { error ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -1015,6 +1047,17 @@ private fun DashboardScreen(accountName: String) {
     }
 
     fun installMapLayers(style: org.maplibre.android.maps.Style) {
+        if (style.getSource("horus-country-source") == null) {
+            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
+                "horus-country-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+            ))
+            style.addLayer(org.maplibre.android.style.layers.LineLayer("horus-country-boundary-layer", "horus-country-source").withProperties(
+                org.maplibre.android.style.layers.PropertyFactory.lineColor(android.graphics.Color.parseColor("#F04438")),
+                org.maplibre.android.style.layers.PropertyFactory.lineWidth(3.5f),
+                org.maplibre.android.style.layers.PropertyFactory.lineJoin("round"),
+                org.maplibre.android.style.layers.PropertyFactory.lineCap("round")
+            ))
+        }
         if (style.getSource("horus-user-source") == null) {
             style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
                 "horus-user-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
