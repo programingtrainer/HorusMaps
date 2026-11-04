@@ -32,7 +32,7 @@ const fromBase64 = value => Uint8Array.from(atob(value), character => character.
 
 const verifyPassword = async (password, saltBase64, hashBase64) => {
   const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: fromBase64(saltBase64), iterations: 120000, hash: "SHA-256" }, keyMaterial, 256);
+  const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: fromBase64(saltBase64), iterations: 100000, hash: "SHA-256" }, keyMaterial, 256);
   const expected = fromBase64(hashBase64);
   const actual = new Uint8Array(derived);
   if (expected.length !== actual.length) return false;
@@ -51,7 +51,7 @@ const hashPassword = async password => {
     ["deriveBits"]
   );
   const derived = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 120000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
     keyMaterial,
     256
   );
