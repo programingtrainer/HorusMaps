@@ -656,7 +656,7 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
     Box(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
             Text(localizedUiText("اختر بريد Horus Maps", "Choose your Horus Maps email"), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
-            Text("سيكون عنوانك الرسمي لحساب $accountName", color = Color(0xFF667085), modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
+            Text(localizedUiText("سيكون عنوانك الرسمي لحساب $accountName", "This will be the official address for $accountName"), color = Color(0xFF667085), modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
             OutlinedTextField(value = handle, onValueChange = { handle = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '.' || char == '_' } }, modifier = Modifier.fillMaxWidth(), singleLine = true, suffix = { Text("@horus.com") }, label = { Text(localizedUiText("اسم البريد", "Email username")) })
             Spacer(Modifier.height(12.dp))
             Text(if (!checked) "" else if (available) localizedUiText("هذا الاسم متاح", "This username is available") else localizedUiText("لا يمكن استخدام هذا الاسم", "This username cannot be used"), color = if (available) Color(0xFF12B76A) else Color(0xFFD92D20))
@@ -711,7 +711,7 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
                 enabled = available && !loading,
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp)
-            ) { Text(if (loading) localizedUiText("جارٍ إنشاء الحساب...", "Creating account...") else "إنشاء الحساب", fontWeight = FontWeight.Bold) }
+            ) { Text(if (loading) localizedUiText("جارٍ إنشاء الحساب...", "Creating account...") else localizedUiText("إنشاء الحساب", "Create account"), fontWeight = FontWeight.Bold) }
             TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text(localizedUiText("العودة", "Back")) }
         }
     }
@@ -1252,7 +1252,7 @@ private fun DashboardScreen(accountName: String) {
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        placeholder = { Text(if (java.util.Locale.getDefault().language == "ar") localizedUiText("ابحث عن دولة أو محافظة أو مدينة أو حي أو شارع", "Search countries, regions, cities, districts, or streets") else "Search countries, regions, cities, districts or streets", fontSize = 12.sp) },
+                        placeholder = { Text(localizedUiText("ابحث عن دولة أو محافظة أو مدينة أو حي أو شارع", "Search countries, regions, cities, districts, or streets"), fontSize = 12.sp) },
                         leadingIcon = { Icon(Icons.Outlined.Search, localizedUiText("بحث", "Search"), tint = Blue, modifier = Modifier.size(19.dp)) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { searchPlace() })
@@ -1377,7 +1377,7 @@ private fun DashboardScreen(accountName: String) {
                         Text(when (item) { "الخريطة" -> "⌖"; localizedUiText("المسارات", "Routes") -> "➤"; localizedUiText("المحفوظات", "Saved") -> "♡"; else -> "◉" },
                             color = if (selectedTab == item) Blue else Color(0xFF98A2B3), fontSize = 21.sp)
                         Spacer(Modifier.height(3.dp))
-                        Text(when (item) { "الخريطة" -> localizedUiText("الخريطة", "Map"); "المسارات" -> localizedUiText("المسارات", "Routes"); "المحفوظات" -> localizedUiText("المحفوظات", "Saved"); else -> localizedUiText("حسابي", "Account") }, color = if (selectedTab == item) Blue else Color(0xFF667085), fontSize = 10.sp,
+                        Text(when (item) { "الخريطة" -> localizedUiText("الخريطة", "Map"); localizedUiText("المسارات", "Routes") -> localizedUiText("المسارات", "Routes"); localizedUiText("المحفوظات", "Saved") -> localizedUiText("المحفوظات", "Saved"); else -> localizedUiText("حسابي", "Account") }, color = if (selectedTab == item) Blue else Color(0xFF667085), fontSize = 10.sp,
                             fontWeight = if (selectedTab == item) FontWeight.Bold else FontWeight.Medium)
                     }
                 }
