@@ -917,7 +917,7 @@ private fun DashboardScreen(accountName: String) {
     var favorites by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
     var dashboardVisible by remember { mutableStateOf(false) }
     var currentRoute by remember { mutableStateOf<org.maplibre.geojson.LineString?>(null) }
-    var routeOriginText by remember { mutableStateOf("موقعي الحالي") }
+    var routeOriginText by remember { mutableStateOf(localizedUiText("موقعي الحالي", "My current location")) }
     var routeDestinationText by remember { mutableStateOf("") }
     var routeOriginPoint by remember { mutableStateOf<org.maplibre.android.geometry.LatLng?>(null) }
     var routeDestinationPoint by remember { mutableStateOf<org.maplibre.android.geometry.LatLng?>(null) }
@@ -1978,7 +1978,7 @@ private fun DashboardScreen(accountName: String) {
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
                 shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 5.dp
             ) {
-                Column(Modifier.padding(15.dp)) {
+                Column(Modifier.padding(15.dp).heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
                     Text(when (selectedTab) { localizedUiText("المحفوظات", "Saved") -> localizedUiText("أماكنك المحفوظة", "Your saved places"); localizedUiText("المسارات", "Routes") -> localizedUiText("المسار الحالي", "Current route"); else -> localizedUiText("حسابك في Horus Maps", "Your Horus Maps account") }, color = Navy, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Spacer(Modifier.height(7.dp))
                     when (selectedTab) {
