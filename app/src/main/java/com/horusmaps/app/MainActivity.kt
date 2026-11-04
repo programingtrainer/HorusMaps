@@ -766,6 +766,15 @@ private fun DashboardScreen(accountName: String) {
     var loadingRoute by remember { mutableStateOf(false) }
     var favorites by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
     var dashboardVisible by remember { mutableStateOf(false) }
+    var currentRoute by remember { mutableStateOf<org.maplibre.geojson.LineString?>(null) }
+    val dashboardAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (dashboardVisible) 1f else 0f,
+        animationSpec = tween(650, easing = FastOutSlowInEasing), label = "dashboard_fade"
+    )
+    val dashboardOffset by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (dashboardVisible) 0f else 26f,
+        animationSpec = tween(650, easing = FastOutSlowInEasing), label = "dashboard_offset"
+    )
 
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
@@ -969,6 +978,7 @@ private fun DashboardScreen(accountName: String) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingRoute = false
                     routeMessage = result.second
+                    currentRoute = result.first
                     val style = mapLibreMap?.style
                     (style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(result.first)
                     mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
@@ -983,6 +993,57 @@ private fun DashboardScreen(accountName: String) {
                 }
             }
         }.start()
+    }
+
+    fun installMapLayers(style: org.maplibre.android.maps.Style) {
+        if (style.getSource("horus-user-source") == null) {
+            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
+                "horus-user-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+            ))
+            style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-user-layer", "horus-user-source").withProperties(
+                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#1677E8")),
+                org.maplibre.android.style.layers.PropertyFactory.circleRadius(8f),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(3f)
+            ))
+        }
+        if (style.getSource("horus-nearby-source") == null) {
+            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
+                "horus-nearby-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+            ))
+            style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-nearby-layer", "horus-nearby-source").withProperties(
+                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#F59E0B")),
+                org.maplibre.android.style.layers.PropertyFactory.circleRadius(6f),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f)
+            ))
+        }
+        if (style.getSource("horus-route-source") == null) {
+            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
+                "horus-route-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+            ))
+            style.addLayer(org.maplibre.android.style.layers.LineLayer("horus-route-layer", "horus-route-source").withProperties(
+                org.maplibre.android.style.layers.PropertyFactory.lineColor(android.graphics.Color.parseColor("#0879D8")),
+                org.maplibre.android.style.layers.PropertyFactory.lineWidth(5f),
+                org.maplibre.android.style.layers.PropertyFactory.lineCap("round"),
+                org.maplibre.android.style.layers.PropertyFactory.lineJoin("round")
+            ))
+        }
+        currentLocation?.let { location ->
+            val feature = org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(location.longitude, location.latitude))
+            (style.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature)))
+        }
+        if (nearbyPlaces.isNotEmpty()) {
+            val features = nearbyPlaces.map { place ->
+                org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(place.longitude, place.latitude))
+            }
+            (style.getSource("horus-nearby-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
+        }
+        currentRoute?.let { line ->
+            (style.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(line)
+        }
     }
 
     LaunchedEffect(currentLocation, mapLibreMap) {
@@ -1009,47 +1070,7 @@ private fun DashboardScreen(accountName: String) {
                         map.setStyle(styleUrl) { style ->
                             map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
                                 .target(org.maplibre.android.geometry.LatLng(30.0444, 31.2357)).zoom(11.5).build()
-                            val userSource = org.maplibre.android.style.sources.GeoJsonSource(
-                                "horus-user-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
-                            )
-                            style.addSource(userSource)
-                            style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-user-layer", "horus-user-source").withProperties(
-                                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#1677E8")),
-                                org.maplibre.android.style.layers.PropertyFactory.circleRadius(8f),
-                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
-                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(3f)
-                            ))
-                            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
-                                "horus-nearby-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
-                            ))
-                            style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-nearby-layer", "horus-nearby-source").withProperties(
-                                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#F59E0B")),
-                                org.maplibre.android.style.layers.PropertyFactory.circleRadius(6f),
-                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
-                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f)
-                            ))
-                            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
-                                "horus-route-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
-                            ))
-                            style.addLayer(org.maplibre.android.style.layers.LineLayer("horus-route-layer", "horus-route-source").withProperties(
-                                org.maplibre.android.style.layers.PropertyFactory.lineColor(android.graphics.Color.parseColor("#0879D8")),
-                                org.maplibre.android.style.layers.PropertyFactory.lineWidth(5f),
-                                org.maplibre.android.style.layers.PropertyFactory.lineCap("round"),
-                                org.maplibre.android.style.layers.PropertyFactory.lineJoin("round")
-                            ))
-                            currentLocation?.let { location ->
-                                val feature = org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(location.longitude, location.latitude))
-                                (style.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)
-                                    ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature)))
-                            }
-                            val savedPlaces = nearbyPlaces.map { it }
-                            if (savedPlaces.isNotEmpty()) {
-                                val features = savedPlaces.map { place ->
-                                    org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(place.longitude, place.latitude))
-                                }
-                                (style.getSource("horus-nearby-source") as? org.maplibre.android.style.sources.GeoJsonSource)
-                                    ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
-                            }
+                            installMapLayers(style)
                         }
                     }
                 }
@@ -1059,8 +1080,8 @@ private fun DashboardScreen(accountName: String) {
 
         Column(
             Modifier.align(Alignment.TopCenter).fillMaxWidth().graphicsLayer {
-                alpha = if (dashboardVisible) 1f else 0f
-                translationY = if (dashboardVisible) 0f else -28f
+                alpha = dashboardAlpha
+                translationY = -dashboardOffset
             }.padding(start = 15.dp, end = 15.dp, top = 40.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp)
         ) {
@@ -1114,8 +1135,8 @@ private fun DashboardScreen(accountName: String) {
 
         Column(
             Modifier.align(Alignment.CenterEnd).padding(end = 13.dp).graphicsLayer {
-                alpha = if (dashboardVisible) 1f else 0f
-                translationX = if (dashboardVisible) 0f else 22f
+                alpha = dashboardAlpha
+                translationX = dashboardOffset
             },
             verticalArrangement = Arrangement.spacedBy(9.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -1133,7 +1154,7 @@ private fun DashboardScreen(accountName: String) {
             }) { Text("◎", color = Blue, fontSize = 23.sp, modifier = Modifier.padding(12.dp)) }
             Surface(shape = RoundedCornerShape(14.dp), color = Color.White, shadowElevation = 5.dp, modifier = Modifier.clickable {
                 darkMap = !darkMap
-                mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty") { }
+                mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty") { style -> installMapLayers(style) }
             }) { Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 21.sp, modifier = Modifier.padding(13.dp)) }
         }
 
@@ -1202,8 +1223,8 @@ private fun DashboardScreen(accountName: String) {
 
         Surface(
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().graphicsLayer {
-                alpha = if (dashboardVisible) 1f else 0f
-                translationY = if (dashboardVisible) 0f else 24f
+                alpha = dashboardAlpha
+                translationY = dashboardOffset
             },
             shape = RoundedCornerShape(topStart = 23.dp, topEnd = 23.dp), color = Color.White, shadowElevation = 12.dp
         ) {
