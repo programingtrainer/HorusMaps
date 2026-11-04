@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -758,6 +759,19 @@ private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
     }
 }
 
+private fun nearbyPlaceIcon(category: String): String = when (category.lowercase(java.util.Locale.ROOT)) {
+    "restaurant", "fast_food", "food_court" -> "◆"
+    "cafe", "coffee" -> "☕"
+    "fuel" -> "⛽"
+    "hospital", "clinic", "doctors" -> "✚"
+    "pharmacy" -> "+"
+    "park", "garden", "playground" -> "♣"
+    "supermarket", "convenience", "mall" -> "▦"
+    "hotel", "hostel" -> "⌂"
+    "atm", "bank" -> "▣"
+    else -> "•"
+}
+
 private data class NearbyPlace(
     val name: String,
     val latitude: Double,
@@ -1055,6 +1069,9 @@ private fun DashboardScreen(accountName: String) {
     var nearbyPlaces by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
     var loadingNearby by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<NearbyPlace?>(null) }
+    var selectedPoiCategory by remember { mutableStateOf("all") }
+    var poiSearchText by remember { mutableStateOf("") }
+    var poiSearchMessage by remember { mutableStateOf("") }
     var routeMessage by remember { mutableStateOf("") }
     var loadingRoute by remember { mutableStateOf(false) }
     var favorites by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
@@ -1284,7 +1301,11 @@ private fun DashboardScreen(accountName: String) {
         val features = points.map { place ->
             org.maplibre.geojson.Feature.fromGeometry(
                 org.maplibre.geojson.Point.fromLngLat(place.longitude, place.latitude)
-            )
+            ).apply {
+                addStringProperty("name", place.name)
+                addStringProperty("category", place.category)
+                addStringProperty("icon", nearbyPlaceIcon(place.category))
+            }
         }
         val collection = org.maplibre.geojson.FeatureCollection.fromFeatures(features)
         (style.getSource(sourceId) as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(collection)
@@ -1481,50 +1502,92 @@ private fun DashboardScreen(accountName: String) {
         }.start()
     }
 
-    fun loadNearbyPlaces() {
-        val origin = currentLocation
+    fun loadNearbyPlaces(category: String = selectedPoiCategory, searchTerm: String = poiSearchText) {
+        val origin = mapLibreMap?.cameraPosition?.target ?: currentLocation
         if (origin == null || loadingNearby) {
-            if (origin == null) locationMessage = localizedUiText("حدد موقعك أولًا لعرض الأماكن القريبة", "Set your location first to see nearby places")
+            if (origin == null) poiSearchMessage = localizedUiText("حدد موقعك أو حرّك الخريطة إلى المنطقة المطلوبة أولًا", "Set your location or move the map to the area you want to search")
             return
         }
         loadingNearby = true
-        routeMessage = ""
+        poiSearchMessage = localizedUiText("جارٍ البحث عن الأماكن القريبة...", "Searching nearby places...")
         Thread {
             runCatching {
-                val query = "[out:json][timeout:20];(nwr(around:1600,${origin.latitude},${origin.longitude})[name];);out center tags 35;"
+                val radiusMeters = if (searchTerm.isBlank()) 5_000 else 8_000
+                val lat = origin.latitude
+                val lon = origin.longitude
+                val categoryFilters = when (category) {
+                    "food" -> listOf("""[amenity~"^(restaurant|cafe|fast_food|food_court|ice_cream)$"]""")
+                    "fuel" -> listOf("""[amenity="fuel"]""")
+                    "health" -> listOf("""[amenity~"^(hospital|clinic|doctors|pharmacy)$"]""")
+                    "parks" -> listOf("""[leisure~"^(park|garden|playground|nature_reserve)$"]""")
+                    "shopping" -> listOf("""[shop~"^(supermarket|convenience|mall|department_store)$"]""")
+                    "stay" -> listOf("""[tourism~"^(hotel|hostel|motel|guest_house)$"]""")
+                    "atm" -> listOf("""[amenity~"^(atm|bank)$"]""")
+                    else -> listOf(
+                        """[amenity~"^(restaurant|cafe|fast_food|hospital|clinic|pharmacy|fuel|atm|bank)$"]""",
+                        """[shop~"^(supermarket|convenience|mall|department_store)$"]""",
+                        """[leisure~"^(park|garden|playground|nature_reserve)$"]""",
+                        """[tourism~"^(hotel|hostel|motel|guest_house)$"]"""
+                    )
+                }
+                val nameFilter = searchTerm.trim().takeIf { it.isNotBlank() }?.let { raw ->
+                    val safe = raw.replace("\\", "\\\\").replace(""", "\\"").replace("|", "\\|")
+                    """[name~"$safe",i]"""
+                } ?: "[name]"
+                val selectors = categoryFilters.joinToString("") { filter ->
+                    "nwr(around:$radiusMeters,$lat,$lon)$filter$nameFilter;"
+                }
+                val query = "[out:json][timeout:25];($selectors);out center tags 100;"
                 val encoded = java.net.URLEncoder.encode(query, "UTF-8")
                 val connection = java.net.URL("https://overpass-api.de/api/interpreter?data=$encoded").openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 15000
-                connection.readTimeout = 25000
-                val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                connection.readTimeout = 30000
+                connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val body = stream.bufferedReader().use { it.readText() }
+                if (code !in 200..299) throw IllegalStateException("Places service returned HTTP $code")
+                val root = org.json.JSONObject(body)
                 val elements = root.optJSONArray("elements") ?: org.json.JSONArray()
-                val places = mutableListOf<NearbyPlace>()
+                val places = mutableListOf<Pair<NearbyPlace, Double>>()
                 for (index in 0 until elements.length()) {
                     val item = elements.optJSONObject(index) ?: continue
                     val tags = item.optJSONObject("tags") ?: continue
                     val name = tags.optString("name").trim()
                     if (name.isBlank()) continue
                     val center = item.optJSONObject("center")
-                    val lat = if (item.has("lat")) item.optDouble("lat") else center?.optDouble("lat") ?: Double.NaN
-                    val lon = if (item.has("lon")) item.optDouble("lon") else center?.optDouble("lon") ?: Double.NaN
-                    if (!lat.isFinite() || !lon.isFinite()) continue
-                    val category = listOf("amenity", "shop", "tourism", "leisure").firstNotNullOfOrNull { key ->
-                        tags.optString(key).takeIf { it.isNotBlank() }
-                    } ?: localizedUiText("مكان", "Place")
-                    places.add(NearbyPlace(name, lat, lon, category))
+                    val placeLat = if (item.has("lat")) item.optDouble("lat") else center?.optDouble("lat") ?: Double.NaN
+                    val placeLon = if (item.has("lon")) item.optDouble("lon") else center?.optDouble("lon") ?: Double.NaN
+                    if (!placeLat.isFinite() || !placeLon.isFinite()) continue
+                    val categoryValue = when {
+                        tags.has("amenity") -> tags.optString("amenity")
+                        tags.has("shop") -> tags.optString("shop")
+                        tags.has("leisure") -> tags.optString("leisure")
+                        tags.has("tourism") -> tags.optString("tourism")
+                        else -> "place"
+                    }
+                    val place = NearbyPlace(name, placeLat, placeLon, categoryValue)
+                    places.add(place to straightLineMeters(origin, org.maplibre.android.geometry.LatLng(placeLat, placeLon)))
                 }
-                places.distinctBy { it.name.lowercase() }.take(35)
+                places.distinctBy { "${it.first.name.lowercase(java.util.Locale.ROOT)}:${it.first.latitude}:${it.first.longitude}" }
+                    .sortedBy { it.second }
+                    .take(60)
+                    .map { it.first }
             }.onSuccess { places ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     nearbyPlaces = places
                     loadingNearby = false
-                    locationMessage = if (places.isEmpty()) localizedUiText("لم نعثر على أماكن مسجلة بالقرب منك", "No mapped places were found nearby") else localizedUiText("تم العثور على ${places.size} مكان قريب", "Found ${places.size} nearby places")
+                    poiSearchMessage = if (places.isEmpty()) {
+                        localizedUiText("لا توجد نتائج مسجلة ضمن نطاق البحث. جرّب تغيير التصنيف أو تحريك الخريطة.", "No mapped results in this search radius. Try another category or move the map.")
+                    } else {
+                        localizedUiText("أقرب ${places.size} نتيجة مرتبة حسب المسافة. بيانات الأماكن © OpenStreetMap.", "Showing the ${places.size} closest results, sorted by distance. Place data © OpenStreetMap.")
+                    }
                     updatePointSource("horus-nearby-source", places)
                 }
-            }.onFailure {
+            }.onFailure { error ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingNearby = false
-                    locationMessage = localizedUiText("تعذر تحميل الأماكن القريبة. حاول مرة أخرى بعد قليل.", "Could not load nearby places. Try again shortly.")
+                    poiSearchMessage = error.message ?: localizedUiText("تعذر تحميل الأماكن القريبة. حاول مرة أخرى.", "Could not load nearby places. Please try again.")
                 }
             }
         }.start()
@@ -1577,12 +1640,15 @@ private fun DashboardScreen(accountName: String) {
         activeNavigation = false
         routeOptions = emptyList()
         routeMessage = localizedUiText("جارٍ تحديد النقطتين وحساب الطرق...", "Finding both places and calculating routes...")
+        val selectedPlaceDestination = selectedPlace?.takeIf { it.name.equals(routeDestinationText.trim(), ignoreCase = true) }
         Thread {
             runCatching {
                 val origin = if (routeOriginText.contains("موقعي", true) || routeOriginText.equals("current location", true) || routeOriginText.equals("my location", true)) {
                     currentLocation ?: throw IllegalStateException(localizedUiText("لم يتم تحديد موقعك بعد", "Your location is not available yet"))
                 } else geocodeRoutePoint(routeOriginText)
-                val destination = geocodeRoutePoint(routeDestinationText)
+                val destination = selectedPlaceDestination?.let {
+                    org.maplibre.android.geometry.LatLng(it.latitude, it.longitude)
+                } ?: geocodeRoutePoint(routeDestinationText)
                 val options = ArrayList<RouteOption>()
                 val failures = ArrayList<String>()
                 // Each land mode is attempted for every geocoded destination, including countries and regions.
@@ -1845,9 +1911,20 @@ private fun DashboardScreen(accountName: String) {
             ))
             style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-nearby-layer", "horus-nearby-source").withProperties(
                 org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#F59E0B")),
-                org.maplibre.android.style.layers.PropertyFactory.circleRadius(6f),
+                org.maplibre.android.style.layers.PropertyFactory.circleRadius(7f),
                 org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
                 org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f)
+            ))
+            style.addLayer(org.maplibre.android.style.layers.SymbolLayer("horus-nearby-icon-layer", "horus-nearby-source").withProperties(
+                org.maplibre.android.style.layers.PropertyFactory.textField(
+                    org.maplibre.android.style.expressions.Expression.get("icon")
+                ),
+                org.maplibre.android.style.layers.PropertyFactory.textSize(13f),
+                org.maplibre.android.style.layers.PropertyFactory.textColor(android.graphics.Color.parseColor("#062A6B")),
+                org.maplibre.android.style.layers.PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
+                org.maplibre.android.style.layers.PropertyFactory.textHaloWidth(1.5f),
+                org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap(true),
+                org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement(true)
             ))
         }
         if (style.getSource("horus-route-source") == null) {
@@ -1866,13 +1943,7 @@ private fun DashboardScreen(accountName: String) {
             (style.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)
                 ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature)))
         }
-        if (nearbyPlaces.isNotEmpty()) {
-            val features = nearbyPlaces.map { place ->
-                org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(place.longitude, place.latitude))
-            }
-            (style.getSource("horus-nearby-source") as? org.maplibre.android.style.sources.GeoJsonSource)
-                ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
-        }
+        if (nearbyPlaces.isNotEmpty()) updatePointSource("horus-nearby-source", nearbyPlaces)
         currentRoute?.let { line ->
             (style.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(line)
         }
@@ -1976,6 +2047,39 @@ private fun DashboardScreen(accountName: String) {
                                 .target(initialTarget).zoom(if (currentLocation != null) 12.5 else 2.0).build()
                             installMapLayers(style)
                             loadContinentBoundaries(style)
+                            map.addOnMapClickListener { tappedPoint ->
+                                val screenPoint = map.projection.toScreenLocation(tappedPoint)
+                                val hit = map.queryRenderedFeatures(
+                                    screenPoint,
+                                    "horus-nearby-icon-layer",
+                                    "horus-nearby-layer"
+                                ).firstOrNull()
+                                if (hit != null) {
+                                    val props = hit.properties()
+                                    val hitName = props?.optString("name").orEmpty()
+                                    val hitCategory = props?.optString("category").orEmpty()
+                                    selectedPlace = nearbyPlaces.firstOrNull {
+                                        it.name == hitName && it.category == hitCategory
+                                    } ?: run {
+                                        val geometry = hit.geometry() as? org.maplibre.geojson.Point
+                                        geometry?.let {
+                                            NearbyPlace(
+                                                hitName.ifBlank { localizedUiText("مكان", "Place") },
+                                                it.latitude(),
+                                                it.longitude(),
+                                                hitCategory
+                                            )
+                                        }
+                                    }
+                                    if (selectedPlace != null) {
+                                        map.animateCamera(
+                                            org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(tappedPoint, map.cameraPosition.zoom.coerceAtLeast(15.0)),
+                                            350
+                                        )
+                                    }
+                                    true
+                                } else false
+                            }
                             if (threeDMode) {
                                 val camera = map.cameraPosition
                                 map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
@@ -2022,6 +2126,83 @@ private fun DashboardScreen(accountName: String) {
                         modifier = Modifier.size(48.dp).background(Blue, RoundedCornerShape(12.dp))
                     ) {
                         Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Surface(shape = RoundedCornerShape(14.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 4.dp) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val categories = listOf(
+                            Triple("all", localizedUiText("الكل", "All"), "⌕"),
+                            Triple("food", localizedUiText("مطاعم وكافيهات", "Food & cafes"), "◆"),
+                            Triple("fuel", localizedUiText("بنزين", "Fuel"), "⛽"),
+                            Triple("health", localizedUiText("مستشفيات وصيدليات", "Health"), "✚"),
+                            Triple("parks", localizedUiText("منتزهات", "Parks"), "♣"),
+                            Triple("shopping", localizedUiText("تسوق", "Shopping"), "▦"),
+                            Triple("stay", localizedUiText("فنادق", "Hotels"), "⌂"),
+                            Triple("atm", localizedUiText("بنوك وATM", "Banks & ATMs"), "▣")
+                        )
+                        categories.forEach { (key, label, icon) ->
+                            val selected = selectedPoiCategory == key
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (selected) Blue else Color(0xFFF2F4F7),
+                                modifier = Modifier.clickable {
+                                    selectedPoiCategory = key
+                                    selectedPlace = null
+                                    loadNearbyPlaces(key, poiSearchText)
+                                }
+                            ) {
+                                Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(icon, color = if (selected) Color.White else Navy, fontSize = 13.sp)
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(label, color = if (selected) Color.White else Navy, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = poiSearchText,
+                            onValueChange = { poiSearchText = it },
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            singleLine = true,
+                            shape = RoundedCornerShape(11.dp),
+                            placeholder = { Text(localizedUiText("ابحث عن مكان قريب مثل بنده", "Search nearby, e.g. Panda"), fontSize = 11.sp) },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { loadNearbyPlaces(selectedPoiCategory, poiSearchText) })
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        IconButton(
+                            onClick = { loadNearbyPlaces(selectedPoiCategory, poiSearchText) },
+                            enabled = !loadingNearby,
+                            modifier = Modifier.size(44.dp).background(Blue, RoundedCornerShape(11.dp))
+                        ) {
+                            Text(if (loadingNearby) "…" else "⌕", color = Color.White, fontSize = 21.sp)
+                        }
+                    }
+                    if (poiSearchMessage.isNotBlank()) {
+                        Text(poiSearchMessage, color = Color(0xFF667085), fontSize = 9.sp, modifier = Modifier.padding(top = 3.dp), maxLines = 2)
+                    }
+                    if (nearbyPlaces.isNotEmpty()) {
+                        val reference = mapLibreMap?.cameraPosition?.target ?: currentLocation
+                        nearbyPlaces.take(3).forEach { place ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { selectedPlace = place }.padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 13.sp)
+                                Spacer(Modifier.width(7.dp))
+                                Text(place.name, color = Navy, fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                                if (reference != null) {
+                                    Text(formatRouteDistance(straightLineMeters(reference, org.maplibre.android.geometry.LatLng(place.latitude, place.longitude))), color = Color(0xFF667085), fontSize = 9.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2249,6 +2430,46 @@ private fun DashboardScreen(accountName: String) {
                         else -> Text(localizedUiText("مرحبًا ${accountName.ifBlank { "بك" }}. إعدادات الحساب والمعلومات الشخصية ستظهر هنا.", "Welcome ${accountName.ifBlank { "there" }}. Your account settings and personal information will appear here."), color = Color(0xFF667085), fontSize = 11.sp)
                     }
                     if (loadingRoute) Text(localizedUiText("جارٍ حساب الطريق...", "Calculating route..."), color = Blue, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = selectedPlace != null,
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 88.dp),
+            enter = fadeIn(tween(220)) + expandVertically(tween(260)),
+            exit = androidx.compose.animation.fadeOut(tween(160)) + androidx.compose.animation.shrinkVertically(tween(180))
+        ) {
+            selectedPlace?.let { place ->
+                Surface(shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 12.dp) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 22.sp)
+                            Spacer(Modifier.width(9.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(place.name, color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(place.category.replace('_', ' '), color = Color(0xFF667085), fontSize = 10.sp)
+                            }
+                            IconButton(onClick = { selectedPlace = null }) {
+                                Icon(Icons.Outlined.Close, localizedUiText("إغلاق", "Close"), tint = Color(0xFF667085))
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                routeOriginText = localizedUiText("موقعي الحالي", "My current location")
+                                routeDestinationText = place.name
+                                selectedTab = localizedUiText("المسارات", "Routes")
+                                calculateJourney()
+                                selectedPlace = null
+                            },
+                            enabled = !loadingRoute,
+                            modifier = Modifier.fillMaxWidth().height(46.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(localizedUiText("احسب المسار إلى هذا المكان", "Get directions to this place"), fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
