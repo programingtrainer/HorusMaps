@@ -31,6 +31,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -733,19 +736,73 @@ private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
 @Composable
 private fun DashboardScreen(accountName: String) {
     val context = LocalContext.current
-    Box(Modifier.fillMaxSize().background(Color(0xFFE8EEF4))) {
+    val focusManager = LocalFocusManager.current
+    var mapLibreMap by remember { mutableStateOf<org.maplibre.android.maps.MapLibreMap?>(null) }
+    var searchText by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var searchMessage by remember { mutableStateOf("") }
+    var darkMap by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf("الخريطة") }
+
+    val styleUrl = if (darkMap) {
+        "https://tiles.openfreemap.org/styles/dark"
+    } else {
+        "https://tiles.openfreemap.org/styles/liberty"
+    }
+
+    fun searchPlace() {
+        val query = searchText.trim()
+        if (query.isEmpty() || searching) return
+        searching = true
+        searchMessage = ""
+        focusManager.clearFocus()
+        Thread {
+            runCatching {
+                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+                val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=1")
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 12_000
+                connection.readTimeout = 12_000
+                connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (Android)")
+                val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+                if (results.length() == 0) throw IllegalStateException("لم يتم العثور على المكان")
+                val result = results.getJSONObject(0)
+                val latitude = result.getDouble("lat")
+                val longitude = result.getDouble("lon")
+                val displayName = result.optString("display_name", query)
+                Pair(org.maplibre.android.geometry.LatLng(latitude, longitude), displayName)
+            }.onSuccess { result ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    searching = false
+                    searchMessage = result.second
+                    mapLibreMap?.animateCamera(
+                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(result.first, 14.5)
+                    )
+                }
+            }.onFailure { error ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    searching = false
+                    searchMessage = error.message ?: "تعذر البحث عن المكان"
+                }
+            }
+        }.start()
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFFE9F0F6))) {
         androidx.compose.ui.viewinterop.AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { viewContext ->
                 org.maplibre.android.MapLibre.getInstance(viewContext)
                 org.maplibre.android.maps.MapView(viewContext).apply {
                     onCreate(null)
+                    onStart()
                     onResume()
                     getMapAsync { map ->
-                        map.setStyle("https://tiles.openfreemap.org/styles/liberty") {
+                        mapLibreMap = map
+                        map.setStyle(styleUrl) {
                             map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
                                 .target(org.maplibre.android.geometry.LatLng(30.0444, 31.2357))
-                                .zoom(11.0)
+                                .zoom(12.0)
                                 .build()
                         }
                     }
@@ -754,42 +811,165 @@ private fun DashboardScreen(accountName: String) {
             update = { }
         )
 
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 18.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 4.dp) {
-                    Image(painterResource(R.drawable.horus_logo), null, Modifier.size(52.dp).padding(6.dp))
+        // Floating map controls stay separate from the vector map, so each can be
+        // styled and extended without changing the underlying map data.
+        Column(
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Surface(shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 8.dp) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "+", fontSize = 27.sp, color = Navy,
+                        modifier = Modifier.clickable {
+                            mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomIn())
+                        }.padding(horizontal = 17.dp, vertical = 5.dp)
+                    )
+                    Box(Modifier.width(30.dp).height(1.dp).background(Color(0xFFE8EDF3)))
+                    Text(
+                        "−", fontSize = 27.sp, color = Navy,
+                        modifier = Modifier.clickable {
+                            mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomOut())
+                        }.padding(horizontal = 17.dp, vertical = 5.dp)
+                    )
                 }
-                Spacer(Modifier.width(10.dp))
-                Surface(shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 4.dp, modifier = Modifier.weight(1f).height(52.dp)) {
-                    Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Search, "بحث", tint = Color(0xFF667085))
+            }
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                shadowElevation = 8.dp,
+                modifier = Modifier.clickable {
+                    mapLibreMap?.animateCamera(
+                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                            org.maplibre.android.geometry.LatLng(30.0444, 31.2357), 12.0
+                        )
+                    )
+                }
+            ) {
+                Text("◎", color = Blue, fontSize = 25.sp, modifier = Modifier.padding(12.dp))
+            }
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                shadowElevation = 8.dp,
+                modifier = Modifier.clickable {
+                    darkMap = !darkMap
+                    mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty")
+                }
+            ) {
+                Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 22.sp, modifier = Modifier.padding(13.dp))
+            }
+        }
+
+        Column(Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 42.dp),
+                shape = RoundedCornerShape(22.dp),
+                color = Color.White,
+                shadowElevation = 10.dp
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painterResource(R.drawable.horus_logo),
+                            contentDescription = "Horus Maps",
+                            modifier = Modifier.size(46.dp).background(Color(0xFFF3F8FC), RoundedCornerShape(14.dp)).padding(4.dp)
+                        )
                         Spacer(Modifier.width(10.dp))
-                        Text("ابحث عن مكان أو عنوان", color = Color(0xFF667085), fontSize = 15.sp)
+                        Column(Modifier.weight(1f)) {
+                            Text("مرحباً، $accountName", color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("إلى أين نذهب اليوم؟", color = Color(0xFF7B8794), fontSize = 12.sp)
+                        }
+                        Surface(shape = CircleShape, color = Color(0xFFEAF7FC)) {
+                            Text("H", color = Blue, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = searchText,
+                            onValueChange = { searchText = it },
+                            modifier = Modifier.weight(1f).heightIn(min = 54.dp),
+                            singleLine = true,
+                            shape = RoundedCornerShape(15.dp),
+                            placeholder = { Text("ابحث عن مدينة أو مكان...", fontSize = 13.sp) },
+                            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = "بحث", tint = Blue) },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { searchPlace() })
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(15.dp),
+                            color = Blue,
+                            modifier = Modifier.size(54.dp).clickable { searchPlace() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    if (searchMessage.isNotBlank()) {
+                        Text(
+                            searchMessage,
+                            color = if (searchMessage.startsWith("لم يتم") || searchMessage.startsWith("تعذر")) Color(0xFFD92D20) else Color(0xFF667085),
+                            fontSize = 11.sp,
+                            maxLines = 2,
+                            modifier = Modifier.padding(top = 7.dp)
+                        )
                     }
                 }
             }
+
             Spacer(Modifier.weight(1f))
-            Surface(shape = RoundedCornerShape(24.dp, 24.dp, 0.dp, 0.dp), color = Color.White, shadowElevation = 12.dp) {
-                Row(Modifier.fillMaxWidth().height(76.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    DashboardNavItem(Icons.Outlined.Search, "الخريطة", true)
-                    DashboardNavItem(Icons.Outlined.Visibility, "المسارات", false)
-                    DashboardNavItem(Icons.Outlined.VisibilityOff, "المحفوظات", false)
-                    DashboardNavItem(Icons.Outlined.Close, "حسابي", false)
+
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.96f), shadowElevation = 4.dp) {
+                    Text("خريطة تفاعلية • OpenFreeMap", color = Color(0xFF667085), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                Surface(shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.96f), shadowElevation = 4.dp) {
+                    Text("بيانات الخرائط", color = Blue, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+                }
+            }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(topStart = 25.dp, topEnd = 25.dp),
+                color = Color.White,
+                shadowElevation = 14.dp
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf("الخريطة", "المسارات", "المحفوظات", "حسابي").forEach { item ->
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxSize().clickable { selectedTab = item },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                when (item) { "الخريطة" -> "⌖"; "المسارات" -> "➤"; "المحفوظات" -> "♡"; else -> "◉" },
+                                color = if (selectedTab == item) Blue else Color(0xFF98A2B3),
+                                fontSize = 22.sp
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                item,
+                                color = if (selectedTab == item) Blue else Color(0xFF667085),
+                                fontSize = 11.sp,
+                                fontWeight = if (selectedTab == item) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun DashboardNavItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, label, tint = if (selected) Blue else Color(0xFF667085))
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = if (selected) Blue else Color(0xFF667085), fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
     }
 }
 
