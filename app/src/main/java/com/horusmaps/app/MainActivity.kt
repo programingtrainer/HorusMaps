@@ -758,7 +758,21 @@ private fun DashboardScreen(accountName: String) {
         )
     }
     var locationMessage by remember { mutableStateOf("نحتاج إذن الموقع لعرض مكانك والأماكن القريبة") }
-    var currentLocation by remember { mutableStateOf<org.maplibre.android.geometry.LatLng?>(null) }
+    val mapPreferences = remember { context.getSharedPreferences("horus_map_data", android.content.Context.MODE_PRIVATE) }
+    var currentLocation by remember {
+        mutableStateOf(
+            runCatching {
+                if (mapPreferences.contains("last_lat") && mapPreferences.contains("last_lon")) {
+                    org.maplibre.android.geometry.LatLng(
+                        mapPreferences.getFloat("last_lat", 0f).toDouble(),
+                        mapPreferences.getFloat("last_lon", 0f).toDouble()
+                    )
+                } else null
+            }.getOrNull()
+        )
+    }
+    var hasFreshLocationFix by remember { mutableStateOf(false) }
+    var hasCenteredOnFreshLocation by remember { mutableStateOf(false) }
     var nearbyPlaces by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
     var loadingNearby by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<NearbyPlace?>(null) }
@@ -811,6 +825,11 @@ private fun DashboardScreen(accountName: String) {
             val listener = object : android.location.LocationListener {
                 override fun onLocationChanged(location: android.location.Location) {
                     currentLocation = org.maplibre.android.geometry.LatLng(location.latitude, location.longitude)
+                    mapPreferences.edit()
+                        .putFloat("last_lat", location.latitude.toFloat())
+                        .putFloat("last_lon", location.longitude.toFloat())
+                        .apply()
+                    hasFreshLocationFix = true
                     locationMessage = "تم تحديد موقعك"
                 }
             }
@@ -1046,14 +1065,23 @@ private fun DashboardScreen(accountName: String) {
         }
     }
 
-    LaunchedEffect(currentLocation, mapLibreMap) {
+    LaunchedEffect(currentLocation, mapLibreMap, hasFreshLocationFix) {
         val location = currentLocation
-        if (location != null && mapLibreMap != null) {
+        val map = mapLibreMap
+        if (location != null && map != null) {
             val point = org.maplibre.geojson.Point.fromLngLat(location.longitude, location.latitude)
             val feature = org.maplibre.geojson.Feature.fromGeometry(point)
             val collection = org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature))
-            (mapLibreMap?.style?.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(collection)
+            (map.style?.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(collection)
+            if (hasFreshLocationFix && !hasCenteredOnFreshLocation) {
+                map.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(location, 14.5))
+                hasCenteredOnFreshLocation = true
+            }
         }
+    }
+
+    LaunchedEffect(currentLocation) {
+        if (currentLocation != null) loadNearbyPlaces()
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFF3F6F9))) {
@@ -1068,8 +1096,9 @@ private fun DashboardScreen(accountName: String) {
                     getMapAsync { map ->
                         mapLibreMap = map
                         map.setStyle(styleUrl) { style ->
+                            val initialTarget = currentLocation ?: org.maplibre.android.geometry.LatLng(0.0, 0.0)
                             map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
-                                .target(org.maplibre.android.geometry.LatLng(30.0444, 31.2357)).zoom(11.5).build()
+                                .target(initialTarget).zoom(if (currentLocation != null) 12.5 else 2.0).build()
                             installMapLayers(style)
                         }
                     }
@@ -1082,41 +1111,34 @@ private fun DashboardScreen(accountName: String) {
             Modifier.align(Alignment.TopCenter).fillMaxWidth().graphicsLayer {
                 alpha = dashboardAlpha
                 translationY = -dashboardOffset
-            }.padding(start = 15.dp, end = 15.dp, top = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(9.dp)
+            }.padding(start = 14.dp, end = 14.dp, top = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Surface(shape = RoundedCornerShape(21.dp), color = Color.White, shadowElevation = 7.dp) {
-                Column(Modifier.padding(13.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(painterResource(R.drawable.horus_logo), "Horus Maps", Modifier.size(43.dp).background(Color(0xFFF1F6FB), RoundedCornerShape(13.dp)).padding(4.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("مرحبًا، ${accountName.ifBlank { "صديقنا" }}", color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            Text("اكتشف ما حولك بسهولة", color = Color(0xFF7B8794), fontSize = 11.sp)
-                        }
-                        Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFFEAF4FF)) {
-                            Text("H", color = Blue, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp))
-                        }
-                    }
-                    Spacer(Modifier.height(11.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = searchText, onValueChange = { searchText = it },
-                            modifier = Modifier.weight(1f).heightIn(min = 52.dp),
-                            singleLine = true, shape = RoundedCornerShape(14.dp),
-                            placeholder = { Text("ابحث عن مكان أو مدينة", fontSize = 13.sp) },
-                            leadingIcon = { Icon(Icons.Outlined.Search, "بحث", tint = Blue) },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { searchPlace() })
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Surface(shape = RoundedCornerShape(14.dp), color = Blue, modifier = Modifier.size(52.dp).clickable { searchPlace() }) {
-                            Box(contentAlignment = Alignment.Center) { Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold) }
+            Surface(shape = RoundedCornerShape(16.dp), color = Color.White.copy(alpha = 0.98f), shadowElevation = 5.dp) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = searchText, onValueChange = { searchText = it },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        singleLine = true, shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("ابحث عن مكان أو مدينة", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, "بحث", tint = Blue, modifier = Modifier.size(19.dp)) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { searchPlace() })
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Surface(shape = RoundedCornerShape(12.dp), color = Blue, modifier = Modifier.size(46.dp).clickable { searchPlace() }) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-                    if (searchMessage.isNotBlank()) {
-                        Text(searchMessage, color = Color(0xFF667085), fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(top = 6.dp))
-                    }
+                }
+            }
+            if (searchMessage.isNotBlank()) {
+                Surface(shape = RoundedCornerShape(10.dp), color = Color.White.copy(alpha = 0.94f), shadowElevation = 2.dp) {
+                    Text(searchMessage, color = Color(0xFF667085), fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
             if (!hasLocationPermission || currentLocation == null) {
@@ -1158,45 +1180,7 @@ private fun DashboardScreen(accountName: String) {
             }) { Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 21.sp, modifier = Modifier.padding(13.dp)) }
         }
 
-        if (selectedTab == "الخريطة") {
-            Surface(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
-                shape = RoundedCornerShape(18.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 5.dp
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("أماكن قريبة منك", color = Navy, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text(if (nearbyPlaces.isEmpty()) "اكتشف المقاهي والمتاجر والمعالم حولك" else "${nearbyPlaces.size} مكان في محيطك", color = Color(0xFF7B8794), fontSize = 10.sp)
-                        }
-                        Button(
-                            onClick = { loadNearbyPlaces() },
-                            enabled = !loadingNearby && currentLocation != null,
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 13.dp, vertical = 7.dp),
-                            shape = RoundedCornerShape(11.dp)
-                        ) { Text(if (loadingNearby) "جارٍ البحث..." else "استكشف القريب", fontSize = 11.sp) }
-                    }
-                    if (nearbyPlaces.isNotEmpty()) {
-                        Spacer(Modifier.height(7.dp))
-                        LazyColumn(Modifier.heightIn(max = 118.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(nearbyPlaces.take(5)) { place ->
-                                Row(Modifier.fillMaxWidth().clickable { drawRoute(place) }.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("●", color = Color(0xFFF59E0B), fontSize = 12.sp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(place.name, color = Navy, fontSize = 11.sp, maxLines = 1, fontWeight = FontWeight.SemiBold)
-                                        Text(place.category, color = Color(0xFF98A2B3), fontSize = 9.sp)
-                                    }
-                                    Text("اتجاهات", color = Blue, fontSize = 10.sp)
-                                    Text(if (favorites.any { it.name == place.name && it.latitude == place.latitude }) "♥" else "♡", color = Blue, fontSize = 18.sp, modifier = Modifier.clickable { saveFavorite(place) }.padding(start = 9.dp))
-                                }
-                            }
-                        }
-                    }
-                    if (locationMessage.isNotBlank()) Text(locationMessage, color = Color(0xFF7B8794), fontSize = 9.sp, maxLines = 1)
-                }
-            }
-        } else if (selectedTab == "المحفوظات" || selectedTab == "المسارات" || selectedTab == "حسابي") {
+        if (selectedTab == "المحفوظات" || selectedTab == "المسارات" || selectedTab == "حسابي") {
             Surface(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
                 shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 5.dp
@@ -1205,7 +1189,7 @@ private fun DashboardScreen(accountName: String) {
                     Text(when (selectedTab) { "المحفوظات" -> "أماكنك المحفوظة"; "المسارات" -> "المسار الحالي"; else -> "حسابك في Horus Maps" }, color = Navy, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Spacer(Modifier.height(7.dp))
                     when (selectedTab) {
-                        "المحفوظات" -> if (favorites.isEmpty()) Text("لم تحفظ أي مكان بعد. احفظ الأماكن من قائمة القريب منك.", color = Color(0xFF7B8794), fontSize = 11.sp)
+                        "المحفوظات" -> if (favorites.isEmpty()) Text("لم تحفظ أي مكان بعد.", color = Color(0xFF7B8794), fontSize = 11.sp)
                             else LazyColumn(Modifier.heightIn(max = 145.dp)) {
                                 items(favorites) { place ->
                                     Row(Modifier.fillMaxWidth().clickable { drawRoute(place) }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1213,7 +1197,7 @@ private fun DashboardScreen(accountName: String) {
                                     }
                                 }
                             }
-                        "المسارات" -> Text(if (routeMessage.isBlank()) "اختر مكانًا قريبًا واضغط «اتجاهات» لحساب مسار القيادة." else routeMessage, color = Color(0xFF667085), fontSize = 11.sp)
+                        "المسارات" -> Text(if (routeMessage.isBlank()) "ستظهر تفاصيل المسار هنا بعد اختيار وجهة." else routeMessage, color = Color(0xFF667085), fontSize = 11.sp)
                         else -> Text("مرحبًا ${accountName.ifBlank { "بك" }}. إعدادات الحساب والمعلومات الشخصية ستظهر هنا.", color = Color(0xFF667085), fontSize = 11.sp)
                     }
                     if (loadingRoute) Text("جارٍ حساب الطريق...", color = Blue, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
