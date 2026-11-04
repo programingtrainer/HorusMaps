@@ -761,6 +761,119 @@ private data class NearbyPlace(
     val category: String
 )
 
+private data class RouteOption(
+    val mode: String,
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val geometry: org.maplibre.geojson.LineString,
+    val instructions: List<String> = emptyList(),
+    val isEstimate: Boolean = false
+)
+
+private fun decodePolyline6(encoded: String): List<org.maplibre.geojson.Point> {
+    val points = ArrayList<org.maplibre.geojson.Point>()
+    var index = 0
+    var lat = 0
+    var lon = 0
+    while (index < encoded.length) {
+        var result = 0
+        var shift = 0
+        var byte: Int
+        do {
+            byte = encoded[index++].code - 63
+            result = result or ((byte and 0x1f) shl shift)
+            shift += 5
+        } while (byte >= 0x20 && index < encoded.length)
+        lat += if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+        result = 0
+        shift = 0
+        do {
+            byte = encoded[index++].code - 63
+            result = result or ((byte and 0x1f) shl shift)
+            shift += 5
+        } while (byte >= 0x20 && index < encoded.length)
+        lon += if ((result and 1) != 0) (result shr 1).inv() else (result shr 1)
+        points.add(org.maplibre.geojson.Point.fromLngLat(lon / 1_000_000.0, lat / 1_000_000.0))
+    }
+    return points
+}
+
+private fun requestValhallaRoute(
+    origin: org.maplibre.android.geometry.LatLng,
+    destination: org.maplibre.android.geometry.LatLng,
+    costing: String
+): RouteOption {
+    val request = org.json.JSONObject()
+        .put("locations", org.json.JSONArray()
+            .put(org.json.JSONObject().put("lat", origin.latitude).put("lon", origin.longitude))
+            .put(org.json.JSONObject().put("lat", destination.latitude).put("lon", destination.longitude)))
+        .put("costing", costing)
+        .put("units", "kilometers")
+        .put("language", java.util.Locale.getDefault().toLanguageTag())
+        .put("shape_format", "polyline6")
+        .put("directions_type", "instructions")
+    val connection = java.net.URL("https://valhalla1.openstreetmap.de/route")
+        .openConnection() as java.net.HttpURLConnection
+    connection.requestMethod = "POST"
+    connection.connectTimeout = 15000
+    connection.readTimeout = 30000
+    connection.doOutput = true
+    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+    connection.setRequestProperty("Accept", "application/json")
+    connection.setRequestProperty("X-Client-Id", "HorusMaps")
+    connection.outputStream.use { it.write(request.toString().toByteArray(Charsets.UTF_8)) }
+    val responseCode = connection.responseCode
+    val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+    val body = stream.bufferedReader().use { it.readText() }
+    if (responseCode !in 200..299) throw IllegalStateException("Routing service error ($responseCode)")
+    val root = org.json.JSONObject(body)
+    val trip = root.optJSONObject("trip") ?: throw IllegalStateException("No route found")
+    val summary = trip.optJSONObject("summary) ?: throw IllegalStateException("No route summary")
+    val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("No route geometry")
+    val allPoints = ArrayList<org.maplibre.geojson.Point>()
+    val instructions = ArrayList<String>()
+    for (i in 0 until legs.length()) {
+        val leg = legs.getJSONObject(i)
+        val shape = leg.optString("shape")
+        if (shape.isNotBlank()) allPoints.addAll(decodePolyline6(shape))
+        val maneuvers = leg.optJSONArray("maneuvers") ?: org.json.JSONArray()
+        for (j in 0 until maneuvers.length()) {
+            val instruction = maneuvers.optJSONObject(j)?.optString("instruction").orEmpty()
+            if (instruction.isNotBlank()) instructions.add(instruction)
+        }
+    }
+    if (allPoints.size < 2) throw IllegalStateException("Route geometry is unavailable")
+    RouteOption(
+        mode = costing,
+        distanceMeters = summary.optDouble("length") * 1000.0,
+        durationSeconds = summary.optDouble("time"),
+        geometry = org.maplibre.geojson.LineString.fromLngLats(allPoints),
+        instructions = instructions
+    )
+}
+
+private fun straightLineMeters(a: org.maplibre.android.geometry.LatLng, b: org.maplibre.android.geometry.LatLng): Double {
+    val earthRadius = 6_371_000.0
+    val dLat = Math.toRadians(b.latitude - a.latitude)
+    val dLon = Math.toRadians(b.longitude - a.longitude)
+    val lat1 = Math.toRadians(a.latitude)
+    val lat2 = Math.toRadians(b.latitude)
+    val h = kotlin.math.sin(dLat / 2).let { it * it } +
+        kotlin.math.cos(lat1) * kotlin.math.cos(lat2) *
+        kotlin.math.sin(dLon / 2).let { it * it }
+    return 2 * earthRadius * kotlin.math.asin(kotlin.math.sqrt(h.coerceIn(0.0, 1.0)))
+}
+
+private fun formatRouteDistance(meters: Double): String =
+    if (meters < 1000.0) "${meters.toInt()} م" else String.format(java.util.Locale.US, "%.2f كم", meters / 1000.0)
+
+private fun formatRouteDuration(seconds: Double): String {
+    val totalMinutes = kotlin.math.ceil(seconds / 60.0).toInt().coerceAtLeast(1)
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return if (hours > 0) "${hours} س ${minutes} د" else "${minutes} د"
+}
+
 @Composable
 private fun DashboardScreen(accountName: String) {
     val context = LocalContext.current
@@ -804,6 +917,17 @@ private fun DashboardScreen(accountName: String) {
     var favorites by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
     var dashboardVisible by remember { mutableStateOf(false) }
     var currentRoute by remember { mutableStateOf<org.maplibre.geojson.LineString?>(null) }
+    var routeOriginText by remember { mutableStateOf("موقعي الحالي") }
+    var routeDestinationText by remember { mutableStateOf("") }
+    var routeOriginPoint by remember { mutableStateOf<org.maplibre.android.geometry.LatLng?>(null) }
+    var routeDestinationPoint by remember { mutableStateOf<org.maplibre.android.geometry.LatLng?>(null) }
+    var routeOptions by remember { mutableStateOf<List<RouteOption>>(emptyList()) }
+    var selectedRouteMode by remember { mutableStateOf("auto") }
+    var activeNavigation by remember { mutableStateOf(false) }
+    var navigationStatus by remember { mutableStateOf("") }
+    var remainingDistanceMeters by remember { mutableStateOf(0.0) }
+    var remainingDurationSeconds by remember { mutableStateOf(0.0) }
+    var nextInstruction by remember { mutableStateOf("") }
     val dashboardAlpha by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (dashboardVisible) 1f else 0f,
         animationSpec = tween(650, easing = FastOutSlowInEasing), label = "dashboard_fade"
@@ -867,6 +991,17 @@ private fun DashboardScreen(accountName: String) {
                         .apply()
                     hasFreshLocationFix = true
                     locationMessage = localizedUiText("تم تحديد موقعك", "Your location was found")
+                    if (activeNavigation) {
+                        val map = mapLibreMap
+                        val bearing = if (location.hasBearing()) location.bearing.toDouble() else map?.cameraPosition?.bearing ?: 0.0
+                        map?.animateCamera(
+                            org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
+                                org.maplibre.android.camera.CameraPosition.Builder()
+                                    .target(org.maplibre.android.geometry.LatLng(location.latitude, location.longitude))
+                                    .zoom(17.0).tilt(if (threeDMode) 60.0 else 45.0).bearing(bearing).build()
+                            ), 700
+                        )
+                    }
                 }
             }
             try {
@@ -1262,6 +1397,116 @@ private fun DashboardScreen(accountName: String) {
             .edit().putStringSet("favorites", serialized).apply()
     }
 
+
+    fun geocodeRoutePoint(query: String): org.maplibre.android.geometry.LatLng {
+        synchronized(nominatimRequestLock) {
+            val elapsed = System.currentTimeMillis() - lastNominatimRequestAt
+            if (elapsed < 1_000L) Thread.sleep(1_000L - elapsed)
+            lastNominatimRequestAt = System.currentTimeMillis()
+        }
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val language = java.net.URLEncoder.encode(java.util.Locale.getDefault().toLanguageTag(), "UTF-8")
+        val connection = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&limit=1&accept-language=$language")
+            .openConnection() as java.net.HttpURLConnection
+        connection.connectTimeout = 15000
+        connection.readTimeout = 20000
+        connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+        connection.setRequestProperty("Accept-Language", java.util.Locale.getDefault().toLanguageTag())
+        val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+        if (results.length() == 0) throw IllegalStateException(localizedUiText("لم يتم العثور على المكان", "Place not found"))
+        val result = results.getJSONObject(0)
+        return org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon"))
+    }
+
+    fun calculateJourney() {
+        if (loadingRoute) return
+        if (routeDestinationText.isBlank()) {
+            routeMessage = localizedUiText("اكتب مكان الوصول أولًا", "Enter a destination first")
+            return
+        }
+        if (!hasLocationPermission && routeOriginText.contains("موقعي", true)) {
+            routeMessage = localizedUiText("اسمح للتطبيق بالوصول إلى موقعك أو اكتب نقطة البداية", "Allow location access or enter a starting point")
+            permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+            return
+        }
+        loadingRoute = true
+        activeNavigation = false
+        routeOptions = emptyList()
+        routeMessage = localizedUiText("جارٍ تحديد النقطتين وحساب الطرق...", "Finding both places and calculating routes...")
+        Thread {
+            runCatching {
+                val origin = if (routeOriginText.contains("موقعي", true) || routeOriginText.equals("current location", true) || routeOriginText.equals("my location", true)) {
+                    currentLocation ?: throw IllegalStateException(localizedUiText("لم يتم تحديد موقعك بعد", "Your location is not available yet"))
+                } else geocodeRoutePoint(routeOriginText)
+                val destination = geocodeRoutePoint(routeDestinationText)
+                val options = ArrayList<RouteOption>()
+                val failures = ArrayList<String>()
+                try { options.add(requestValhallaRoute(origin, destination, "auto")) }
+                catch (_: Exception) { failures.add(localizedUiText("تعذر حساب طريق السيارة", "Car route unavailable")) }
+                try { options.add(requestValhallaRoute(origin, destination, "pedestrian")) }
+                catch (_: Exception) { failures.add(localizedUiText("تعذر حساب طريق المشي", "Walking route unavailable")) }
+                val directDistance = straightLineMeters(origin, destination)
+                if (directDistance >= 200_000.0) {
+                    val flightSeconds = (directDistance / 800.0) * 3600.0 + 90.0 * 60.0
+                    options.add(RouteOption(
+                        mode = "flight",
+                        distanceMeters = directDistance,
+                        durationSeconds = flightSeconds,
+                        geometry = org.maplibre.geojson.LineString.fromLngLats(listOf(
+                            org.maplibre.geojson.Point.fromLngLat(origin.longitude, origin.latitude),
+                            org.maplibre.geojson.Point.fromLngLat(destination.longitude, destination.latitude)
+                        )),
+                        isEstimate = true
+                    ))
+                }
+                if (options.isEmpty()) throw IllegalStateException(failures.joinToString(" • ").ifBlank { "No routes found" })
+                Triple(origin, destination, options)
+            }.onSuccess { result ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    routeOriginPoint = result.first
+                    routeDestinationPoint = result.second
+                    routeOptions = result.third
+                    val preferred = result.third.firstOrNull { it.mode == selectedRouteMode } ?: result.third.first()
+                    selectedRouteMode = preferred.mode
+                    currentRoute = preferred.geometry
+                    (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(preferred.geometry)
+                    val bounds = org.maplibre.android.geometry.LatLngBounds.Builder().include(result.first).include(result.second).build()
+                    runCatching { mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(bounds, 100)) }
+                    routeMessage = localizedUiText("تم العثور على ${result.third.size} خيارات. اختر وسيلة التنقل ثم اضغط ابدأ.", "Found ${result.third.size} options. Choose a travel mode and press Start.")
+                    loadingRoute = false
+                    selectedTab = localizedUiText("المسارات", "Routes")
+                }
+            }.onFailure { error ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    loadingRoute = false
+                    routeMessage = error.message ?: localizedUiText("تعذر حساب الطريق. تحقق من الاتصال وحاول مرة أخرى.", "Could not calculate the route. Check your connection and try again.")
+                }
+            }
+        }.start()
+    }
+
+    fun startNavigation() {
+        val option = routeOptions.firstOrNull { it.mode == selectedRouteMode } ?: return
+        activeNavigation = true
+        currentRoute = option.geometry
+        remainingDistanceMeters = option.distanceMeters
+        remainingDurationSeconds = option.durationSeconds
+        nextInstruction = option.instructions.firstOrNull().orEmpty()
+        navigationStatus = localizedUiText("بدأت الملاحة المباشرة", "Live navigation started")
+        (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(option.geometry)
+        currentLocation?.let { location ->
+            mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
+                org.maplibre.android.camera.CameraPosition.Builder().target(location).zoom(17.0)
+                    .tilt(if (threeDMode) 60.0 else 45.0).build()
+            ), 800)
+        }
+    }
+
+    fun stopNavigation() {
+        activeNavigation = false
+        navigationStatus = localizedUiText("تم إيقاف الملاحة", "Navigation stopped")
+    }
+
     fun drawRoute(destination: NearbyPlace) {
         val origin = currentLocation
         if (origin == null || loadingRoute) {
@@ -1489,6 +1734,41 @@ private fun DashboardScreen(accountName: String) {
 
     LaunchedEffect(currentLocation) {
         if (currentLocation != null) loadNearbyPlaces()
+    }
+
+    LaunchedEffect(currentLocation, activeNavigation, routeOptions, selectedRouteMode) {
+        val location = currentLocation
+        if (activeNavigation && location != null) {
+            val option = routeOptions.firstOrNull { it.mode == selectedRouteMode }
+            if (option != null) {
+                val points = option.geometry.coordinates()
+                if (points.size >= 2) {
+                    var nearestIndex = 0
+                    var nearestDistance = Double.MAX_VALUE
+                    points.forEachIndexed { index, point ->
+                        val distance = straightLineMeters(location, org.maplibre.android.geometry.LatLng(point.latitude(), point.longitude()))
+                        if (distance < nearestDistance) { nearestDistance = distance; nearestIndex = index }
+                    }
+                    var remaining = 0.0
+                    for (i in nearestIndex until points.lastIndex) {
+                        remaining += straightLineMeters(
+                            org.maplibre.android.geometry.LatLng(points[i].latitude(), points[i].longitude()),
+                            org.maplibre.android.geometry.LatLng(points[i + 1].latitude(), points[i + 1].longitude())
+                        )
+                    }
+                    remainingDistanceMeters = remaining
+                    val fraction = (remaining / option.distanceMeters.coerceAtLeast(1.0)).coerceIn(0.0, 1.0)
+                    remainingDurationSeconds = option.durationSeconds * fraction
+                    navigationStatus = if (nearestDistance > 90.0)
+                        localizedUiText("أنت بعيد عن المسار. أعد حساب الطريق عند الحاجة.", "You are away from the route. Recalculate if needed.")
+                    else localizedUiText("أنت على المسار", "You are on route")
+                    if (remaining < 25.0) {
+                        activeNavigation = false
+                        navigationStatus = localizedUiText("وصلت إلى وجهتك 🎉", "You have arrived 🎉")
+                    }
+                }
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFF3F6F9))) {
