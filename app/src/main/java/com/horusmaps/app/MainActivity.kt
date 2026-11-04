@@ -767,7 +767,8 @@ private data class RouteOption(
     val durationSeconds: Double,
     val geometry: org.maplibre.geojson.LineString,
     val instructions: List<String> = emptyList(),
-    val isEstimate: Boolean = false
+    val isEstimate: Boolean = false,
+    val details: String = ""
 )
 
 private fun decodePolyline6(encoded: String): List<org.maplibre.geojson.Point> {
@@ -862,6 +863,139 @@ private fun straightLineMeters(a: org.maplibre.android.geometry.LatLng, b: org.m
         kotlin.math.cos(lat1) * kotlin.math.cos(lat2) *
         kotlin.math.sin(dLon / 2).let { it * it }
     return 2 * earthRadius * kotlin.math.asin(kotlin.math.sqrt(h.coerceIn(0.0, 1.0)))
+}
+
+
+private data class AirportCandidate(
+    val iata: String,
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val accessDistanceMeters: Double
+)
+
+private data class FlightEstimate(
+    val distanceMeters: Double,
+    val durationSeconds: Double,
+    val geometry: org.maplibre.geojson.LineString,
+    val details: String
+)
+
+private fun getJson(urlText: String, userAgent: String = "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)"): org.json.JSONObject {
+    val connection = java.net.URL(urlText).openConnection() as java.net.HttpURLConnection
+    connection.connectTimeout = 12000
+    connection.readTimeout = 20000
+    connection.setRequestProperty("User-Agent", userAgent)
+    connection.setRequestProperty("Accept", "application/json")
+    try {
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val body = stream.bufferedReader().use { it.readText() }
+        if (code !in 200..299) throw IllegalStateException("HTTP $code")
+        return org.json.JSONObject(body)
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun findNearbyAirports(point: org.maplibre.android.geometry.LatLng): List<AirportCandidate> {
+    val query = "[out:json][timeout:20];(node(around:150000,${point.latitude},${point.longitude})[aeroway~\"^(aerodrome|airport)$\"];way(around:150000,${point.latitude},${point.longitude})[aeroway~\"^(aerodrome|airport)$\"];relation(around:150000,${point.latitude},${point.longitude})[aeroway~\"^(aerodrome|airport)$\"];);out center tags 50;"
+    val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+    val root = getJson("https://overpass-api.de/api/interpreter?data=$encoded")
+    val elements = root.optJSONArray("elements") ?: org.json.JSONArray()
+    val found = ArrayList<AirportCandidate>()
+    for (i in 0 until elements.length()) {
+        val item = elements.optJSONObject(i) ?: continue
+        val tags = item.optJSONObject("tags") ?: continue
+        val iata = (tags.optString("iata").ifBlank { tags.optString("iata:airport") }).uppercase(java.util.Locale.ROOT)
+        if (!iata.matches(Regex("[A-Z]{3}"))) continue
+        val center = item.optJSONObject("center")
+        val lat = if (item.has("lat")) item.optDouble("lat") else center?.optDouble("lat") ?: Double.NaN
+        val lon = if (item.has("lon")) item.optDouble("lon") else center?.optDouble("lon") ?: Double.NaN
+        if (!lat.isFinite() || !lon.isFinite()) continue
+        found.add(AirportCandidate(
+            iata = iata,
+            name = tags.optString("name").ifBlank { iata },
+            latitude = lat,
+            longitude = lon,
+            accessDistanceMeters = straightLineMeters(point, org.maplibre.android.geometry.LatLng(lat, lon))
+        ))
+    }
+    return found.distinctBy { it.iata }.sortedBy { it.accessDistanceMeters }.take(6)
+}
+
+private fun buildFlightEstimate(
+    origin: org.maplibre.android.geometry.LatLng,
+    destination: org.maplibre.android.geometry.LatLng
+): FlightEstimate {
+    val originAirports = runCatching { findNearbyAirports(origin) }.getOrDefault(emptyList())
+    val destinationAirports = runCatching { findNearbyAirports(destination) }.getOrDefault(emptyList())
+    var chosenOrigin: AirportCandidate? = originAirports.firstOrNull()
+    var chosenDestination: AirportCandidate? = destinationAirports.firstOrNull()
+    var scheduledRouteKm: Double? = null
+    var routeHasOpenTrafficEvidence = false
+
+    // Prefer a documented nonstop airport pair when the open route dataset contains one.
+    for (from in originAirports.take(5)) {
+        val airportData = runCatching {
+            getJson("https://airportmiles.com/api/v1/airports/${from.iata.lowercase(java.util.Locale.ROOT)}.json")
+        }.getOrNull() ?: continue
+        val routes = airportData.optJSONArray("routes") ?: continue
+        for (to in destinationAirports.take(5)) {
+            val matching = (0 until routes.length()).asSequence()
+                .mapNotNull { routes.optJSONObject(it) }
+                .firstOrNull { it.optJSONObject("to")?.optString("iata") == to.iata }
+            if (matching != null) {
+                chosenOrigin = from
+                chosenDestination = to
+                scheduledRouteKm = matching.optDouble("km").takeIf { it > 0.0 }
+                routeHasOpenTrafficEvidence = scheduledRouteKm != null
+                break
+            }
+        }
+        if (scheduledRouteKm != null) break
+    }
+
+    val fromAirport = chosenOrigin
+    val toAirport = chosenDestination
+    val flightDistance = if (scheduledRouteKm != null) scheduledRouteKm!! * 1000.0
+        else if (fromAirport != null && toAirport != null) straightLineMeters(
+            org.maplibre.android.geometry.LatLng(fromAirport.latitude, fromAirport.longitude),
+            org.maplibre.android.geometry.LatLng(toAirport.latitude, toAirport.longitude)
+        ) else straightLineMeters(origin, destination)
+
+    // Cruise-speed estimate plus 90 minutes for airport procedures. This is not a timetable.
+    val cruiseSeconds = flightDistance / (800.0 * 1000.0 / 3600.0)
+    val airportProcedureSeconds = 90.0 * 60.0
+    val duration = cruiseSeconds + airportProcedureSeconds
+    val points = buildList {
+        if (fromAirport != null) add(org.maplibre.geojson.Point.fromLngLat(fromAirport.longitude, fromAirport.latitude))
+        else add(org.maplibre.geojson.Point.fromLngLat(origin.longitude, origin.latitude))
+        if (toAirport != null) add(org.maplibre.geojson.Point.fromLngLat(toAirport.longitude, toAirport.latitude))
+        else add(org.maplibre.geojson.Point.fromLngLat(destination.longitude, destination.latitude))
+    }
+    val details = when {
+        fromAirport != null && toAirport != null && routeHasOpenTrafficEvidence ->
+            localizedUiText(
+                "من ${fromAirport.name} (${fromAirport.iata}) إلى ${toAirport.name} (${toAirport.iata}). يوجد مسار جوي مباشر في بيانات المطارات المفتوحة. الزمن تقديري ولا يمثل موعد رحلة.",
+                "From ${fromAirport.name} (${fromAirport.iata}) to ${toAirport.name} (${toAirport.iata}). An open-data nonstop route is listed. Duration is estimated, not a flight schedule."
+            )
+        fromAirport != null && toAirport != null ->
+            localizedUiText(
+                "أقرب مطار: ${fromAirport.name} (${fromAirport.iata})، والوجهة: ${toAirport.name} (${toAirport.iata}). لم يتم التحقق من رحلة مباشرة؛ المسافة والزمن تقدير جوي.",
+                "Nearest airports: ${fromAirport.name} (${fromAirport.iata}) and ${toAirport.name} (${toAirport.iata}). A nonstop flight was not verified; distance and time are air estimates."
+            )
+        else -> localizedUiText(
+            "تعذر تحديد مطارات مناسبة من بيانات المطارات؛ المعروض تقدير بخط جوي مباشر فقط.",
+            "Suitable airports could not be identified; this is only a straight-line air estimate."
+        )
+    }
+    return FlightEstimate(
+        distanceMeters = flightDistance,
+        durationSeconds = duration,
+        geometry = org.maplibre.geojson.LineString.fromLngLats(points),
+        details = details
+    )
 }
 
 private fun formatRouteDistance(meters: Double): String =
@@ -1452,24 +1586,22 @@ private fun DashboardScreen(accountName: String) {
                 val destination = geocodeRoutePoint(routeDestinationText)
                 val options = ArrayList<RouteOption>()
                 val failures = ArrayList<String>()
+                // Each land mode is attempted for every geocoded destination, including countries and regions.
                 try { options.add(requestValhallaRoute(origin, destination, "auto")) }
-                catch (_: Exception) { failures.add(localizedUiText("تعذر حساب طريق السيارة", "Car route unavailable")) }
+                catch (_: Exception) { failures.add(localizedUiText("لا يوجد مسار سيارة بري متصل أو تعذر حسابه", "No connected road route was found, or car routing failed")) }
                 try { options.add(requestValhallaRoute(origin, destination, "pedestrian")) }
-                catch (_: Exception) { failures.add(localizedUiText("تعذر حساب طريق المشي", "Walking route unavailable")) }
-                val directDistance = straightLineMeters(origin, destination)
-                if (directDistance >= 200_000.0) {
-                    val flightSeconds = (directDistance / (800.0 * 1000.0 / 3600.0)) + 90.0 * 60.0
-                    options.add(RouteOption(
-                        mode = "flight",
-                        distanceMeters = directDistance,
-                        durationSeconds = flightSeconds,
-                        geometry = org.maplibre.geojson.LineString.fromLngLats(listOf(
-                            org.maplibre.geojson.Point.fromLngLat(origin.longitude, origin.latitude),
-                            org.maplibre.geojson.Point.fromLngLat(destination.longitude, destination.latitude)
-                        )),
-                        isEstimate = true
-                    ))
-                }
+                catch (_: Exception) { failures.add(localizedUiText("لا يوجد مسار مشي بري متصل أو تعذر حسابه", "No connected walking route was found, or pedestrian routing failed")) }
+
+                // Always show an air option. Prefer nearby airports and an open-data nonstop route.
+                val flight = buildFlightEstimate(origin, destination)
+                options.add(RouteOption(
+                    mode = "flight",
+                    distanceMeters = flight.distanceMeters,
+                    durationSeconds = flight.durationSeconds,
+                    geometry = flight.geometry,
+                    isEstimate = true,
+                    details = flight.details
+                ))
                 if (options.isEmpty()) throw IllegalStateException(failures.joinToString(" • ").ifBlank { "No routes found" })
                 Triple(origin, destination, options)
             }.onSuccess { result ->
@@ -1483,7 +1615,7 @@ private fun DashboardScreen(accountName: String) {
                     (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(preferred.geometry)
                     val bounds = org.maplibre.android.geometry.LatLngBounds.Builder().include(result.first).include(result.second).build()
                     runCatching { mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(bounds, 100)) }
-                    routeMessage = localizedUiText("تم العثور على ${result.third.size} خيارات. اختر وسيلة التنقل ثم اضغط ابدأ.", "Found ${result.third.size} options. Choose a travel mode and press Start.")
+                    routeMessage = localizedUiText("تم حساب خيارات الرحلة. بعض الوسائل قد لا تتوفر إذا لم يوجد مسار بري متصل أو بيانات نقل.", "Journey options calculated. Some modes may be unavailable when no connected land route or transit data exists.")
                     loadingRoute = false
                     selectedTab = localizedUiText("المسارات", "Routes")
                 }
@@ -2054,9 +2186,9 @@ private fun DashboardScreen(accountName: String) {
                                 Spacer(Modifier.height(7.dp))
                                 routeOptions.forEach { option ->
                                     val label = when (option.mode) {
-                                        "auto" -> localizedUiText("🚗 سيارة", "🚗 Car")
-                                        "pedestrian" -> localizedUiText("🚶 مشي", "🚶 Walk")
-                                        else -> localizedUiText("✈️ طيران (تقديري)", "✈️ Flight (estimate)")
+                                        "auto" -> localizedUiText("سيارة", "Car")
+                                        "pedestrian" -> localizedUiText("مشي", "Walk")
+                                        else -> localizedUiText("طيران - تقديري", "Flight - estimate")
                                     }
                                     Surface(modifier = Modifier.fillMaxWidth().clickable {
                                         selectedRouteMode = option.mode
@@ -2069,6 +2201,7 @@ private fun DashboardScreen(accountName: String) {
                                             Column(horizontalAlignment = Alignment.End) {
                                                 Text(formatRouteDistance(option.distanceMeters), color = Blue, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                                 if (option.mode == "auto") {
+                                                    Text(formatRouteDuration(option.durationSeconds), color = Color(0xFF667085), fontSize = 11.sp)
                                                     Text(formatDrivingTrafficEstimate(option.durationSeconds), color = Color(0xFF667085), fontSize = 9.sp, textAlign = TextAlign.End)
                                                 } else {
                                                     Text(formatRouteDuration(option.durationSeconds), color = Color(0xFF667085), fontSize = 11.sp)
@@ -2076,13 +2209,16 @@ private fun DashboardScreen(accountName: String) {
                                             }
                                         }
                                     }
+                                    if (option.details.isNotBlank()) {
+                                        Text(option.details, color = Color(0xFF667085), fontSize = 9.sp, modifier = Modifier.padding(start = 9.dp, end = 9.dp, bottom = 5.dp))
+                                    }
                                 }
-                                Text(localizedUiText("🚆 القطار: لا تتوفر حاليًا بيانات مواعيد ومسارات قطارات موثوقة لهذه المنطقة.", "🚆 Train: reliable rail schedules and routes are not currently available for this area."),
+                                Text(localizedUiText("القطار: سيتم عرضه عند توفر مزود بيانات وجداول موثوقة للمنطقة.", "Train: shown when a reliable timetable and data provider are available for the area."),
                                     color = Color(0xFF98A2B3), fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
-                                Text(localizedUiText("أوقات السيارة والمشي تقديرية حسب بيانات الطرق، ولا تتضمن ازدحامًا مروريًا مباشرًا.", "Car and walking times are estimates from road data and do not include live traffic."),
+                                Text(localizedUiText("أوقات السيارة والمشي تقديرية من شبكة الطرق ولا تتضمن بيانات ازدحام حيّة. مسارات البر لا يمكن حسابها عبر البحار والمحيطات.", "Car and walking times are estimates from the road network and do not include live traffic. Land routes cannot cross seas or oceans."),
                                     color = Color(0xFF98A2B3), fontSize = 9.sp)
                                 if (routeOptions.firstOrNull { it.mode == selectedRouteMode }?.isEstimate == true) {
-                                    Text(localizedUiText("زمن الطيران تقديري بخط جوي مباشر، ولا يمثل رحلة أو موعدًا فعليًا.", "Flight time is a straight-line estimate, not an actual scheduled flight."),
+                                    Text(localizedUiText("زمن الطيران تقديري بسرعة طيران متوسطة مع وقت إجراءات المطار، ولا يمثل حجزًا أو موعد إقلاع فعليًا.", "Flight time is an estimate using average cruise speed and airport procedure time; it is not a booking or actual departure schedule."),
                                         color = Color(0xFFB54708), fontSize = 9.sp)
                                 }
                                 if (activeNavigation) {
