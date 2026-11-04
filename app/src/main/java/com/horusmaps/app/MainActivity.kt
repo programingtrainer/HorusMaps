@@ -769,6 +769,7 @@ private fun DashboardScreen(accountName: String) {
     var searchText by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var boundaryExpiresAt by remember { mutableStateOf(0L) }
+    var continentGeoJson by remember { mutableStateOf<String?>(null) }
     var searchMessage by remember { mutableStateOf("") }
     var darkMap by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("الخريطة") }
@@ -814,7 +815,7 @@ private fun DashboardScreen(accountName: String) {
     LaunchedEffect(boundaryExpiresAt) {
         val expectedExpiry = boundaryExpiresAt
         if (expectedExpiry > 0L) {
-            kotlinx.coroutines.delay(30_000L)
+            kotlinx.coroutines.delay(20_000L)
             if (boundaryExpiresAt == expectedExpiry) {
                 val source = mapLibreMap?.style?.getSource("horus-country-source")
                     as? org.maplibre.android.style.sources.GeoJsonSource
@@ -891,6 +892,113 @@ private fun DashboardScreen(accountName: String) {
     val styleUrl = if (darkMap) "https://tiles.openfreemap.org/styles/dark"
         else "https://tiles.openfreemap.org/styles/liberty"
 
+    fun loadContinentBoundaries(style: org.maplibre.android.maps.Style) {
+        if (continentGeoJson != null) {
+            (style.getSource("horus-continent-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                ?.setGeoJson(continentGeoJson!!)
+            return
+        }
+        Thread {
+            runCatching {
+                val url = java.net.URL(
+                    "https://services.arcgis.com/o6oETlrWetREI1A2/ArcGIS/rest/services/Nevis_2D_WebVersion/FeatureServer/29/query?where=1%3D1&outFields=CONTINENT&outSR=4326&returnGeometry=true&f=geojson"
+                )
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 15000
+                connection.readTimeout = 30000
+                connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+                val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                val features = root.optJSONArray("features")
+                    ?: throw IllegalStateException("Continent boundary data is unavailable")
+                val language = java.util.Locale.getDefault().language
+                for (index in 0 until features.length()) {
+                    val feature = features.getJSONObject(index)
+                    val properties = feature.optJSONObject("properties") ?: org.json.JSONObject()
+                    val englishName = properties.optString("CONTINENT")
+                    val localizedName = when (englishName.lowercase(java.util.Locale.ROOT)) {
+                        "africa" -> if (language == "ar") "أفريقيا" else "Africa"
+                        "antarctica" -> if (language == "ar") "القارة القطبية الجنوبية" else "Antarctica"
+                        "asia" -> if (language == "ar") "آسيا" else "Asia"
+                        "europe" -> if (language == "ar") "أوروبا" else "Europe"
+                        "north america" -> if (language == "ar") "أمريكا الشمالية" else "North America"
+                        "south america" -> if (language == "ar") "أمريكا الجنوبية" else "South America"
+                        "oceania", "australia" -> if (language == "ar") "أوقيانوسيا" else "Oceania"
+                        else -> englishName
+                    }
+                    properties.put("localized_name", localizedName)
+                    feature.put("properties", properties)
+                }
+                root.toString()
+            }.onSuccess { geoJson ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    continentGeoJson = geoJson
+                    (mapLibreMap?.style?.getSource("horus-continent-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                        ?.setGeoJson(geoJson)
+                }
+            }
+        }.start()
+    }
+
+    fun showContinentSearchResult(continentName: String, geoJson: String): Boolean {
+        val root = runCatching { org.json.JSONObject(geoJson) }.getOrNull() ?: return false
+        val features = root.optJSONArray("features") ?: return false
+        for (index in 0 until features.length()) {
+            val feature = features.optJSONObject(index) ?: continue
+            val properties = feature.optJSONObject("properties") ?: continue
+            if (!properties.optString("CONTINENT").equals(continentName, ignoreCase = true)) continue
+            val selectedCollection = org.json.JSONObject()
+                .put("type", "FeatureCollection")
+                .put("features", org.json.JSONArray().put(feature))
+            val boundarySource = mapLibreMap?.style?.getSource("horus-country-source")
+                as? org.maplibre.android.style.sources.GeoJsonSource
+            boundarySource?.setGeoJson(selectedCollection.toString())
+            boundaryExpiresAt = android.os.SystemClock.elapsedRealtime() + 20_000L
+            val geometry = feature.optJSONObject("geometry")
+            val coordinates = geometry?.optJSONArray("coordinates")
+            if (coordinates != null) {
+                var south = 90.0
+                var north = -90.0
+                var west = 180.0
+                var east = -180.0
+                fun scan(value: Any?) {
+                    when (value) {
+                        is org.json.JSONArray -> {
+                            if (value.length() >= 2 && value.opt(0) is Number && value.opt(1) is Number) {
+                                val lon = (value.opt(0) as Number).toDouble()
+                                val lat = (value.opt(1) as Number).toDouble()
+                                west = minOf(west, lon)
+                                east = maxOf(east, lon)
+                                south = minOf(south, lat)
+                                north = maxOf(north, lat)
+                            } else {
+                                for (i in 0 until value.length()) scan(value.opt(i))
+                            }
+                        }
+                    }
+                }
+                scan(coordinates)
+                if (south <= north && west <= east) {
+                    runCatching {
+                        val bounds = org.maplibre.android.geometry.LatLngBounds.Builder()
+                            .include(org.maplibre.android.geometry.LatLng(south, west))
+                            .include(org.maplibre.android.geometry.LatLng(north, east))
+                            .build()
+                        mapLibreMap?.animateCamera(
+                            org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(bounds, 70)
+                        )
+                    }
+                }
+            }
+            searchMessage = localizedUiText(
+                "القارة: ${properties.optString("localized_name", continentName)}",
+                "Continent: ${properties.optString("localized_name", continentName)}"
+            )
+            searching = false
+            return true
+        }
+        return false
+    }
+
     fun updatePointSource(sourceId: String, points: List<NearbyPlace>) {
         val style = mapLibreMap?.style ?: return
         val features = points.map { place ->
@@ -905,6 +1013,73 @@ private fun DashboardScreen(accountName: String) {
     fun searchPlace() {
         val query = searchText.trim()
         if (query.isEmpty() || searching) return
+        val normalizedContinentQuery = query.lowercase(java.util.Locale.ROOT)
+            .replace("continent", "").replace("قارة", "").trim()
+        val continentAliases = mapOf(
+            "africa" to "Africa", "أفريقيا" to "Africa", "افريقيا" to "Africa", "أفريقا" to "Africa",
+            "antarctica" to "Antarctica", "أنتاركتيكا" to "Antarctica", "القارة القطبية الجنوبية" to "Antarctica",
+            "asia" to "Asia", "آسيا" to "Asia", "اسيا" to "Asia",
+            "europe" to "Europe", "أوروبا" to "Europe", "اوروبا" to "Europe",
+            "north america" to "North America", "أمريكا الشمالية" to "North America", "امريكا الشمالية" to "North America",
+            "south america" to "South America", "أمريكا الجنوبية" to "South America", "امريكا الجنوبية" to "South America",
+            "oceania" to "Oceania", "أوقيانوسيا" to "Oceania", "اوقيانوسيا" to "Oceania",
+            "australia continent" to "Oceania", "قارة أستراليا" to "Oceania", "قارة استراليا" to "Oceania"
+        )
+        val matchedContinent = continentAliases[normalizedContinentQuery]
+        if (matchedContinent != null) {
+            searching = true
+            searchMessage = localizedUiText("جارٍ تحميل حدود القارة...", "Loading continent boundaries...")
+            val cached = continentGeoJson
+            if (cached != null && showContinentSearchResult(matchedContinent, cached)) return
+            Thread {
+                runCatching {
+                    val url = java.net.URL(
+                        "https://services.arcgis.com/o6oETlrWetREI1A2/ArcGIS/rest/services/Nevis_2D_WebVersion/FeatureServer/29/query?where=1%3D1&outFields=CONTINENT&outSR=4326&returnGeometry=true&f=geojson"
+                    )
+                    val connection = url.openConnection() as java.net.HttpURLConnection
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 30000
+                    connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+                    val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val features = root.optJSONArray("features") ?: throw IllegalStateException("No continent data")
+                    val language = java.util.Locale.getDefault().language
+                    for (i in 0 until features.length()) {
+                        val feature = features.getJSONObject(i)
+                        val properties = feature.optJSONObject("properties") ?: org.json.JSONObject()
+                        val englishName = properties.optString("CONTINENT")
+                        val label = when (englishName.lowercase(java.util.Locale.ROOT)) {
+                            "africa" -> if (language == "ar") "أفريقيا" else "Africa"
+                            "antarctica" -> if (language == "ar") "القارة القطبية الجنوبية" else "Antarctica"
+                            "asia" -> if (language == "ar") "آسيا" else "Asia"
+                            "europe" -> if (language == "ar") "أوروبا" else "Europe"
+                            "north america" -> if (language == "ar") "أمريكا الشمالية" else "North America"
+                            "south america" -> if (language == "ar") "أمريكا الجنوبية" else "South America"
+                            "oceania", "australia" -> if (language == "ar") "أوقيانوسيا" else "Oceania"
+                            else -> englishName
+                        }
+                        properties.put("localized_name", label)
+                        feature.put("properties", properties)
+                    }
+                    root.toString()
+                }.onSuccess { geoJson ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        continentGeoJson = geoJson
+                        (mapLibreMap?.style?.getSource("horus-continent-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                            ?.setGeoJson(geoJson)
+                        if (!showContinentSearchResult(matchedContinent, geoJson)) {
+                            searching = false
+                            searchMessage = localizedUiText("تعذر العثور على حدود القارة", "Could not find continent boundaries")
+                        }
+                    }
+                }.onFailure {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        searching = false
+                        searchMessage = localizedUiText("تعذر تحميل حدود القارة", "Could not load continent boundaries")
+                    }
+                }
+            }.start()
+            return
+        }
         searching = true
         searchMessage = ""
         focusManager.clearFocus()
@@ -960,7 +1135,7 @@ private fun DashboardScreen(accountName: String) {
 
                     if (isAdministrativeArea && hasAreaGeometry) {
                         boundarySource?.setGeoJson(geometry.toString())
-                        boundaryExpiresAt = android.os.SystemClock.elapsedRealtime() + 30_000L
+                        boundaryExpiresAt = android.os.SystemClock.elapsedRealtime() + 20_000L
                     } else {
                         boundarySource?.setGeoJson(
                             org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
@@ -1157,6 +1332,40 @@ private fun DashboardScreen(accountName: String) {
                 )
             }
         }
+        if (style.getSource("horus-continent-source") == null) {
+            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
+                "horus-continent-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+            ))
+            val continentBoundaryLayer = org.maplibre.android.style.layers.LineLayer(
+                "horus-continent-boundary-layer", "horus-continent-source"
+            ).withProperties(
+                org.maplibre.android.style.layers.PropertyFactory.lineColor(android.graphics.Color.parseColor("#667085")),
+                org.maplibre.android.style.layers.PropertyFactory.lineWidth(0.9f),
+                org.maplibre.android.style.layers.PropertyFactory.lineJoin("round"),
+                org.maplibre.android.style.layers.PropertyFactory.lineCap("round")
+            )
+            continentBoundaryLayer.setMaxZoom(3.8f)
+            style.addLayer(continentBoundaryLayer)
+
+            val continentLabelLayer = org.maplibre.android.style.layers.SymbolLayer(
+                "horus-continent-label-layer", "horus-continent-source"
+            ).withProperties(
+                org.maplibre.android.style.layers.PropertyFactory.textField(
+                    org.maplibre.android.style.expressions.Expression.get("localized_name")
+                ),
+                org.maplibre.android.style.layers.PropertyFactory.textSize(12f),
+                org.maplibre.android.style.layers.PropertyFactory.textColor(android.graphics.Color.parseColor("#344054")),
+                org.maplibre.android.style.layers.PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
+                org.maplibre.android.style.layers.PropertyFactory.textHaloWidth(1.4f),
+                org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap(false)
+            )
+            continentLabelLayer.setMaxZoom(3.8f)
+            style.addLayer(continentLabelLayer)
+        }
+        if (continentGeoJson != null) {
+            (style.getSource("horus-continent-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                ?.setGeoJson(continentGeoJson!!)
+        }
         if (style.getSource("horus-country-source") == null) {
             style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
                 "horus-country-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
@@ -1253,6 +1462,7 @@ private fun DashboardScreen(accountName: String) {
                             map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
                                 .target(initialTarget).zoom(if (currentLocation != null) 12.5 else 2.0).build()
                             installMapLayers(style)
+                            loadContinentBoundaries(style)
                         }
                     }
                 }
