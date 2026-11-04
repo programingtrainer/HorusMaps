@@ -1532,7 +1532,7 @@ private fun DashboardScreen(accountName: String) {
                     )
                 }
                 val nameFilter = searchTerm.trim().takeIf { it.isNotBlank() }?.let { raw ->
-                    val safe = raw.replace("\\", "\\\\").replace(""", "\\"").replace("|", "\\|")
+                    val safe = raw.filter { it.isLetterOrDigit() || it.isWhitespace() || it == '-' }
                     """[name~"$safe",i]"""
                 } ?: "[name]"
                 val selectors = categoryFilters.joinToString("") { filter ->
@@ -2059,8 +2059,8 @@ private fun DashboardScreen(accountName: String) {
                                     "horus-nearby-layer"
                                 ).firstOrNull()
                                 if (hit != null) {
-                                    val hitName = runCatching { hit.getStringProperty("name") }.getOrDefault("")
-                                    val hitCategory = runCatching { hit.getStringProperty("category") }.getOrDefault("")
+                                    val hitName = runCatching { hit.getStringProperty("name") }.getOrNull().orEmpty()
+                                    val hitCategory = runCatching { hit.getStringProperty("category") }.getOrNull().orEmpty()
                                     selectedPlace = nearbyPlaces.firstOrNull {
                                         it.name == hitName && it.category == hitCategory
                                     } ?: run {
@@ -2237,7 +2237,7 @@ private fun DashboardScreen(accountName: String) {
             shape = RoundedCornerShape(14.dp),
             color = Color.White,
             shadowElevation = 5.dp,
-            modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 250.dp)
+            modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 280.dp)
                 .clickable {
                     mapLibreMap?.animateCamera(
                         org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
@@ -2260,7 +2260,7 @@ private fun DashboardScreen(accountName: String) {
                 shape = RoundedCornerShape(14.dp),
                 color = Color.White,
                 shadowElevation = 5.dp,
-                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 250.dp)
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 280.dp)
                     .clickable {
                         permissionLauncher.launch(arrayOf(
                             android.Manifest.permission.ACCESS_FINE_LOCATION,
