@@ -5,6 +5,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import android.os.Bundle
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -2184,13 +2188,17 @@ private fun DashboardScreen(accountName: String) {
                             }
                             if (routeOptions.isNotEmpty()) {
                                 Spacer(Modifier.height(7.dp))
-                                routeOptions.forEach { option ->
+                                routeOptions.forEachIndexed { index, option ->
+                                    AnimatedVisibility(
+                                        visible = true,
+                                        enter = fadeIn(tween(300, delayMillis = index * 75)) + expandVertically(tween(300, delayMillis = index * 75))
+                                    ) {
                                     val label = when (option.mode) {
                                         "auto" -> localizedUiText("سيارة", "Car")
                                         "pedestrian" -> localizedUiText("مشي", "Walk")
                                         else -> localizedUiText("طيران - تقديري", "Flight - estimate")
                                     }
-                                    Surface(modifier = Modifier.fillMaxWidth().clickable {
+                                    Surface(modifier = Modifier.fillMaxWidth().animateContentSize(tween(280, easing = FastOutSlowInEasing)).clickable {
                                         selectedRouteMode = option.mode
                                         currentRoute = option.geometry
                                         (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(option.geometry)
@@ -2211,6 +2219,7 @@ private fun DashboardScreen(accountName: String) {
                                     }
                                     if (option.details.isNotBlank()) {
                                         Text(option.details, color = Color(0xFF667085), fontSize = 9.sp, modifier = Modifier.padding(start = 9.dp, end = 9.dp, bottom = 5.dp))
+                                    }
                                     }
                                 }
                                 Text(localizedUiText("القطار: سيتم عرضه عند توفر مزود بيانات وجداول موثوقة للمنطقة.", "Train: shown when a reliable timetable and data provider are available for the area."),
