@@ -1560,7 +1560,10 @@ private fun DashboardScreen(accountName: String) {
                     val item = elements.optJSONObject(index) ?: continue
                     val tags = item.optJSONObject("tags") ?: continue
                     val name = tags.optString("name").trim()
+                        .ifBlank { tags.optString("name:ar").trim() }
+                        .ifBlank { tags.optString("name:en").trim() }
                         .ifBlank { tags.optString("brand").trim() }
+                        .ifBlank { tags.optString("brand:ar").trim() }
                         .ifBlank { tags.optString("operator").trim() }
                     if (name.isBlank()) continue
                     val center = item.optJSONObject("center")
@@ -2180,7 +2183,7 @@ private fun DashboardScreen(accountName: String) {
                             Surface(
                                 shape = RoundedCornerShape(20.dp),
                                 color = if (selected) Blue else Color(0xFFF2F4F7),
-                                modifier = Modifier.clickable {
+                                modifier = Modifier.animateContentSize(tween(180)).clickable(enabled = !loadingNearby) {
                                     selectedPoiCategory = key
                                     selectedPlace = null
                                     loadNearbyPlaces(key, poiSearchText)
