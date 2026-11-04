@@ -1279,7 +1279,10 @@ private fun DashboardScreen(accountName: String) {
             }
             if (searchMessage.isNotBlank()) {
                 Surface(shape = RoundedCornerShape(10.dp), color = Color.White.copy(alpha = 0.94f), shadowElevation = 2.dp) {
-                    Text(searchMessage, color = Color(0xFF667085), fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                    Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Text(searchMessage, color = Color(0xFF667085), fontSize = 10.sp, maxLines = 2)
+                        Text(localizedUiText("بيانات البحث © OpenStreetMap contributors", "Search data © OpenStreetMap contributors"), color = Color(0xFF98A2B3), fontSize = 8.sp)
+                    }
                 }
             }
         }
