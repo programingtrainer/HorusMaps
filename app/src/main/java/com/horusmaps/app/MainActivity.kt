@@ -1108,7 +1108,7 @@ private fun DashboardScreen(accountName: String) {
         )
 
         Column(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth(0.84f).widthIn(max = 350.dp).graphicsLayer {
+            Modifier.align(Alignment.TopCenter).fillMaxWidth(0.84f).graphicsLayer {
                 alpha = dashboardAlpha
                 translationY = -dashboardOffset
             }.padding(top = 14.dp),
