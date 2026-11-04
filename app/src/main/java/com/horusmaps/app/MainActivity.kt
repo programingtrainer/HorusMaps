@@ -492,7 +492,8 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
     var firstName by remember { mutableStateOf("") }
     var familyName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    val availableCountries = remember { localizedCountries() }\n    var country by remember { mutableStateOf(availableCountries.first { it.dialCode == "+20" }) }
+    val availableCountries = remember { localizedCountries() }
+    var country by remember { mutableStateOf(availableCountries.first { it.dialCode == "+20" }) }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var confirmPassword by remember { mutableStateOf("") }
