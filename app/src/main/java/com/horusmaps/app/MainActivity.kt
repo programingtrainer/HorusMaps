@@ -772,6 +772,7 @@ private fun DashboardScreen(accountName: String) {
     var continentGeoJson by remember { mutableStateOf<String?>(null) }
     var searchMessage by remember { mutableStateOf("") }
     var darkMap by remember { mutableStateOf(false) }
+    var threeDMode by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("الخريطة") }
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -1332,6 +1333,50 @@ private fun DashboardScreen(accountName: String) {
                 )
             }
         }
+
+        // Add a 3D building extrusion layer only when the selected basemap
+        // does not already provide one (Liberty may include it by default).
+        if (style.layers.none { it is org.maplibre.android.style.layers.FillExtrusionLayer }) {
+            val buildingSourceId = when {
+                style.getSource("openmaptiles") != null -> "openmaptiles"
+                style.getSource("openfreemap") != null -> "openfreemap"
+                else -> null
+            }
+            if (buildingSourceId != null) {
+                val buildings3d = org.maplibre.android.style.layers.FillExtrusionLayer(
+                    "horus-3d-buildings", buildingSourceId
+                ).apply {
+                    sourceLayer = "building"
+                    minZoom = 15f
+                    setFilter(
+                        org.maplibre.android.style.expressions.Expression.all(
+                            org.maplibre.android.style.expressions.Expression.has("render_height"),
+                            org.maplibre.android.style.expressions.Expression.has("render_min_height")
+                        )
+                    )
+                    setProperties(
+                        org.maplibre.android.style.layers.PropertyFactory.fillExtrusionColor(
+                            android.graphics.Color.parseColor("#C7D0DA")
+                        ),
+                        org.maplibre.android.style.layers.PropertyFactory.fillExtrusionHeight(
+                            org.maplibre.android.style.expressions.Expression.get("render_height")
+                        ),
+                        org.maplibre.android.style.layers.PropertyFactory.fillExtrusionBase(
+                            org.maplibre.android.style.expressions.Expression.get("render_min_height")
+                        ),
+                        org.maplibre.android.style.layers.PropertyFactory.fillExtrusionOpacity(0.92f)
+                    )
+                }
+                val firstLabelLayer = style.layers
+                    .filterIsInstance<org.maplibre.android.style.layers.SymbolLayer>()
+                    .firstOrNull()
+                if (firstLabelLayer != null) {
+                    style.addLayerBelow(buildings3d, firstLabelLayer.id)
+                } else {
+                    style.addLayer(buildings3d)
+                }
+            }
+        }
         if (style.getSource("horus-continent-source") == null) {
             style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
                 "horus-continent-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
@@ -1463,6 +1508,15 @@ private fun DashboardScreen(accountName: String) {
                                 .target(initialTarget).zoom(if (currentLocation != null) 12.5 else 2.0).build()
                             installMapLayers(style)
                             loadContinentBoundaries(style)
+                            if (threeDMode) {
+                                val camera = map.cameraPosition
+                                map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                                    .target(camera.target)
+                                    .zoom(camera.zoom)
+                                    .bearing(camera.bearing)
+                                    .tilt(60.0)
+                                    .build()
+                            }
                         }
                     }
                 }
@@ -1576,6 +1630,36 @@ private fun DashboardScreen(accountName: String) {
                 darkMap = !darkMap
                 mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty") { style -> installMapLayers(style) }
             }) { Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 21.sp, modifier = Modifier.padding(13.dp)) }
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (threeDMode) Color(0xFFEAF7FC) else Color.White,
+                shadowElevation = 5.dp,
+                modifier = Modifier.clickable {
+                    threeDMode = !threeDMode
+                    mapLibreMap?.let { map ->
+                        val camera = map.cameraPosition
+                        map.animateCamera(
+                            org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
+                                org.maplibre.android.camera.CameraPosition.Builder()
+                                    .target(camera.target)
+                                    .zoom(camera.zoom)
+                                    .bearing(camera.bearing)
+                                    .tilt(if (threeDMode) 60.0 else 0.0)
+                                    .build()
+                            ),
+                            650
+                        )
+                    }
+                }
+            ) {
+                Text(
+                    if (threeDMode) "2D" else "3D",
+                    color = if (threeDMode) Blue else Navy,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 13.dp)
+                )
+            }
         }
 
         if (selectedTab == localizedUiText("المحفوظات", "Saved") || selectedTab == localizedUiText("المسارات", "Routes") || selectedTab == localizedUiText("حسابي", "My account")) {
