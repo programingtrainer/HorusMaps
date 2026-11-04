@@ -828,7 +828,7 @@ private fun requestValhallaRoute(
     if (responseCode !in 200..299) throw IllegalStateException("Routing service error ($responseCode)")
     val root = org.json.JSONObject(body)
     val trip = root.optJSONObject("trip") ?: throw IllegalStateException("No route found")
-    val summary = trip.optJSONObject("summary) ?: throw IllegalStateException("No route summary")
+    val summary = trip.optJSONObject("summary") ?: throw IllegalStateException("No route summary")
     val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("No route geometry")
     val allPoints = ArrayList<org.maplibre.geojson.Point>()
     val instructions = ArrayList<String>()
