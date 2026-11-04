@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
             var accountName by remember { mutableStateOf("") }
             var accountDraft by remember { mutableStateOf(AccountDraft()) }
             val context = LocalContext.current
-            val deviceArabic = java.util.Locale.getDefault().language == "ar"
+            val deviceLayoutDirection = if (android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault()) == android.view.View.LAYOUT_DIRECTION_RTL) LayoutDirection.Rtl else LayoutDirection.Ltr
 
             LaunchedEffect(Unit) {
                 delay(5_000)
@@ -143,7 +143,7 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = HorusColorScheme) {
-                CompositionLocalProvider(LocalLayoutDirection provides if (deviceArabic) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                CompositionLocalProvider(LocalLayoutDirection provides deviceLayoutDirection) {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         Crossfade(
                             targetState = currentScreen,
