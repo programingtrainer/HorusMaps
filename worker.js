@@ -111,10 +111,21 @@ export default {
       if (!/^[a-z][a-z0-9._]{2,19}$/.test(emailHandle) || emailHandle === "admin") return json({ error: "invalid_email" }, 400);
       if (password !== confirmPassword || passwordScore(password) < 3) return json({ error: "invalid_password" }, 400);
 
-      const existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+      let existing;
+      try {
+        existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+      } catch (error) {
+        return json({ error: "database_query_failed", detail: String(error?.message ?? error) }, 500);
+      }
       if (existing) return json({ error: "email_taken" }, 409);
 
-      const credentials = await hashPassword(password);
+      let credentials;
+      try {
+        credentials = await hashPassword(password);
+      } catch (error) {
+        return json({ error: "password_hash_failed", detail: String(error?.message ?? error) }, 500);
+      }
+
       const now = new Date().toISOString();
       const id = crypto.randomUUID();
 
@@ -125,7 +136,7 @@ export default {
           .bind(id, firstName, lastName, phone || null, country, dialCode, email, credentials.salt, credentials.hash, now, now)
           .run();
       } catch (error) {
-        return json({ error: "email_taken_or_database_error" }, 409);
+        return json({ error: "database_insert_failed", detail: String(error?.message ?? error) }, 500);
       }
 
       return json({ ok: true, user: { id, name: `${firstName} ${lastName}`, email } }, 201);
