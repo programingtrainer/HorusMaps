@@ -928,6 +928,7 @@ private fun DashboardScreen(accountName: String) {
     var remainingDistanceMeters by remember { mutableStateOf(0.0) }
     var remainingDurationSeconds by remember { mutableStateOf(0.0) }
     var nextInstruction by remember { mutableStateOf("") }
+    var lastRerouteAt by remember { mutableStateOf(0L) }
     val dashboardAlpha by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (dashboardVisible) 1f else 0f,
         animationSpec = tween(650, easing = FastOutSlowInEasing), label = "dashboard_fade"
@@ -1487,6 +1488,15 @@ private fun DashboardScreen(accountName: String) {
 
     fun startNavigation() {
         val option = routeOptions.firstOrNull { it.mode == selectedRouteMode } ?: return
+        if (option.mode == "flight") {
+            navigationStatus = localizedUiText("خط الطيران تقديري ولا يدعم الملاحة الحية.", "The estimated flight line does not support live turn-by-turn navigation.")
+            return
+        }
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+            navigationStatus = localizedUiText("اسمح بالوصول إلى الموقع لبدء الملاحة الحية.", "Allow location access to start live navigation.")
+            return
+        }
         activeNavigation = true
         currentRoute = option.geometry
         remainingDistanceMeters = option.distanceMeters
@@ -1760,8 +1770,29 @@ private fun DashboardScreen(accountName: String) {
                     val fraction = (remaining / option.distanceMeters.coerceAtLeast(1.0)).coerceIn(0.0, 1.0)
                     remainingDurationSeconds = option.durationSeconds * fraction
                     navigationStatus = if (nearestDistance > 90.0)
-                        localizedUiText("أنت بعيد عن المسار. أعد حساب الطريق عند الحاجة.", "You are away from the route. Recalculate if needed.")
+                        localizedUiText("خرجت عن المسار. جارٍ إعادة الحساب...", "You are off route. Recalculating...")
                     else localizedUiText("أنت على المسار", "You are on route")
+                    val destination = routeDestinationPoint
+                    val now = System.currentTimeMillis()
+                    if (nearestDistance > 90.0 && destination != null && now - lastRerouteAt > 30_000L) {
+                        lastRerouteAt = now
+                        val mode = selectedRouteMode
+                        Thread {
+                            runCatching { requestValhallaRoute(location, destination, mode) }
+                                .onSuccess { replacement ->
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        routeOptions = routeOptions.map { if (it.mode == mode) replacement else it }
+                                        currentRoute = replacement.geometry
+                                        (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(replacement.geometry)
+                                        navigationStatus = localizedUiText("تم تحديث الطريق تلقائيًا", "Route automatically updated")
+                                    }
+                                }.onFailure {
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        navigationStatus = localizedUiText("تعذرت إعادة حساب الطريق. تحقق من الاتصال.", "Could not recalculate route. Check your connection.")
+                                    }
+                                }
+                        }.start()
+                    }
                     if (remaining < 25.0) {
                         activeNavigation = false
                         navigationStatus = localizedUiText("وصلت إلى وجهتك 🎉", "You have arrived 🎉")
@@ -1959,7 +1990,76 @@ private fun DashboardScreen(accountName: String) {
                                     }
                                 }
                             }
-                        localizedUiText("المسارات", "Routes") -> Text(if (routeMessage.isBlank()) localizedUiText("ستظهر تفاصيل المسار هنا بعد اختيار وجهة.", "Route details will appear here after you choose a destination.") else routeMessage, color = Color(0xFF667085), fontSize = 11.sp)
+                        localizedUiText("المسارات", "Routes") -> {
+                            Text(localizedUiText("خطط رحلتك", "Plan your trip"), color = Navy, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = routeOriginText, onValueChange = { routeOriginText = it },
+                                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                                label = { Text(localizedUiText("من", "From")) },
+                                trailingIcon = { Text("📍", modifier = Modifier.clickable {
+                                    routeOriginText = localizedUiText("موقعي الحالي", "My current location")
+                                }.padding(6.dp)) }
+                            )
+                            Spacer(Modifier.height(5.dp))
+                            OutlinedTextField(
+                                value = routeDestinationText, onValueChange = { routeDestinationText = it },
+                                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                                label = { Text(localizedUiText("إلى", "To")) }
+                            )
+                            Spacer(Modifier.height(7.dp))
+                            Button(onClick = { calculateJourney() }, enabled = !loadingRoute && !activeNavigation,
+                                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                                Text(if (loadingRoute) localizedUiText("جارٍ حساب المسارات...", "Calculating routes...") else localizedUiText("احسب المسافة والوقت", "Calculate distance and time"))
+                            }
+                            if (routeOptions.isNotEmpty()) {
+                                Spacer(Modifier.height(7.dp))
+                                routeOptions.forEach { option ->
+                                    val label = when (option.mode) {
+                                        "auto" -> localizedUiText("🚗 سيارة", "🚗 Car")
+                                        "pedestrian" -> localizedUiText("🚶 مشي", "🚶 Walk")
+                                        else -> localizedUiText("✈️ طيران (تقديري)", "✈️ Flight (estimate)")
+                                    }
+                                    Surface(modifier = Modifier.fillMaxWidth().clickable {
+                                        selectedRouteMode = option.mode
+                                        currentRoute = option.geometry
+                                        (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(option.geometry)
+                                    }.padding(vertical = 2.dp), shape = RoundedCornerShape(10.dp),
+                                        color = if (selectedRouteMode == option.mode) Color(0xFFEAF4FF) else Color(0xFFF7F9FC)) {
+                                        Row(Modifier.fillMaxWidth().padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(label, color = Navy, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                            Text(formatRouteDistance(option.distanceMeters), color = Blue, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(formatRouteDuration(option.durationSeconds), color = Color(0xFF667085), fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                                Text(localizedUiText("🚆 القطار: لا تتوفر حاليًا بيانات مواعيد ومسارات قطارات موثوقة لهذه المنطقة.", "🚆 Train: reliable rail schedules and routes are not currently available for this area."),
+                                    color = Color(0xFF98A2B3), fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                                if (routeOptions.firstOrNull { it.mode == selectedRouteMode }?.isEstimate == true) {
+                                    Text(localizedUiText("زمن الطيران تقديري بخط جوي مباشر، ولا يمثل رحلة أو موعدًا فعليًا.", "Flight time is a straight-line estimate, not an actual scheduled flight."),
+                                        color = Color(0xFFB54708), fontSize = 9.sp)
+                                }
+                                if (activeNavigation) {
+                                    Text(nextInstruction.ifBlank { navigationStatus }, color = Navy, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                                    Text("${localizedUiText("المتبقي", "Remaining")}: ${formatRouteDistance(remainingDistanceMeters)} • ${formatRouteDuration(remainingDurationSeconds)}", color = Blue, fontSize = 11.sp)
+                                    Text(navigationStatus, color = Color(0xFF667085), fontSize = 10.sp)
+                                    OutlinedButton(onClick = { stopNavigation() }, modifier = Modifier.fillMaxWidth()) {
+                                        Text(localizedUiText("إيقاف الملاحة", "Stop navigation"))
+                                    }
+                                } else {
+                                    Button(
+                                        onClick = { startNavigation() },
+                                        enabled = selectedRouteMode != "flight",
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(localizedUiText("ابدأ الملاحة", "Start navigation"))
+                                    }
+                                }
+                            }
+                            if (routeMessage.isNotBlank()) Text(routeMessage, color = Color(0xFF667085), fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+                        }
                         else -> Text(localizedUiText("مرحبًا ${accountName.ifBlank { "بك" }}. إعدادات الحساب والمعلومات الشخصية ستظهر هنا.", "Welcome ${accountName.ifBlank { "there" }}. Your account settings and personal information will appear here."), color = Color(0xFF667085), fontSize = 11.sp)
                     }
                     if (loadingRoute) Text(localizedUiText("جارٍ حساب الطريق...", "Calculating route..."), color = Blue, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
