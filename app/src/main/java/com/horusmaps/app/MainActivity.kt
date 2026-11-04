@@ -843,7 +843,7 @@ private fun requestValhallaRoute(
         }
     }
     if (allPoints.size < 2) throw IllegalStateException("Route geometry is unavailable")
-    RouteOption(
+    return RouteOption(
         mode = costing,
         distanceMeters = summary.optDouble("length") * 1000.0,
         durationSeconds = summary.optDouble("time"),
