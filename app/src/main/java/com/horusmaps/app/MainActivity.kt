@@ -1108,10 +1108,10 @@ private fun DashboardScreen(accountName: String) {
         )
 
         Column(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth().graphicsLayer {
+            Modifier.align(Alignment.TopCenter).fillMaxWidth(0.84f).widthIn(max = 350.dp).graphicsLayer {
                 alpha = dashboardAlpha
                 translationY = -dashboardOffset
-            }.padding(start = 14.dp, end = 14.dp, top = 14.dp),
+            }.padding(top = 14.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Surface(shape = RoundedCornerShape(16.dp), color = Color.White.copy(alpha = 0.98f), shadowElevation = 5.dp) {
@@ -1120,38 +1120,70 @@ private fun DashboardScreen(accountName: String) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedTextField(
-                        value = searchText, onValueChange = { searchText = it },
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        singleLine = true, shape = RoundedCornerShape(12.dp),
+                        value = searchText,
+                        onValueChange = { searchText = it },
+                        modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
                         placeholder = { Text("ابحث عن مكان أو مدينة", fontSize = 12.sp) },
                         leadingIcon = { Icon(Icons.Outlined.Search, "بحث", tint = Blue, modifier = Modifier.size(19.dp)) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { searchPlace() })
                     )
                     Spacer(Modifier.width(7.dp))
-                    Surface(shape = RoundedCornerShape(12.dp), color = Blue, modifier = Modifier.size(46.dp).clickable { searchPlace() }) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                        }
+                    IconButton(
+                        onClick = { searchPlace() },
+                        enabled = !searching,
+                        modifier = Modifier.size(48.dp).background(Blue, RoundedCornerShape(12.dp))
+                    ) {
+                        Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
             if (searchMessage.isNotBlank()) {
                 Surface(shape = RoundedCornerShape(10.dp), color = Color.White.copy(alpha = 0.94f), shadowElevation = 2.dp) {
-                    Text(searchMessage, color = Color(0xFF667085), fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                    Text(searchMessage, color = Color(0xFF667085), fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
-            if (!hasLocationPermission || currentLocation == null) {
-                Surface(shape = RoundedCornerShape(15.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 3.dp) {
-                    Row(Modifier.fillMaxWidth().clickable {
-                        if (!hasLocationPermission) permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
-                    }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("◎", color = Blue, fontSize = 20.sp)
-                        Spacer(Modifier.width(9.dp))
-                        Text(locationMessage, color = Color(0xFF667085), fontSize = 11.sp, modifier = Modifier.weight(1f))
-                        if (!hasLocationPermission) Text("تفعيل", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
+        }
+
+        // Keep a dedicated compass control clear of the search field.
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color.White,
+            shadowElevation = 5.dp,
+            modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 88.dp)
+                .clickable {
+                    mapLibreMap?.animateCamera(
+                        org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
+                            org.maplibre.android.camera.CameraPosition.Builder()
+                                .target(mapLibreMap?.cameraPosition?.target)
+                                .zoom(mapLibreMap?.cameraPosition?.zoom ?: 12.0)
+                                .tilt(mapLibreMap?.cameraPosition?.tilt ?: 0.0)
+                                .bearing(0.0)
+                                .build()
+                        )
+                    )
                 }
+        ) {
+            Text("🧭", fontSize = 22.sp, modifier = Modifier.padding(10.dp))
+        }
+
+        // Request location again from the visible control if permission is not granted.
+        if (!hasLocationPermission) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color.White,
+                shadowElevation = 5.dp,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 88.dp)
+                    .clickable {
+                        permissionLauncher.launch(arrayOf(
+                            android.Manifest.permission.ACCESS_FINE_LOCATION,
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                        ))
+                    }
+            ) {
+                Text("📍", fontSize = 21.sp, modifier = Modifier.padding(11.dp))
             }
         }
 
