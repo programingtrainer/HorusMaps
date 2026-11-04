@@ -874,32 +874,61 @@ private fun DashboardScreen(accountName: String) {
         searching = true
         searchMessage = ""
         focusManager.clearFocus()
+
+        // Use the device locale for geocoding results and support free-form
+        // queries such as country, governorate, city, district, street and address.
+        val deviceLocale = java.util.Locale.getDefault()
+        val languageTag = deviceLocale.toLanguageTag()
         Thread {
             runCatching {
-                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-                val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=1&addressdetails=1&polygon_geojson=1")
+                val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+                val encodedLanguage = java.net.URLEncoder.encode(languageTag, "UTF-8")
+                val url = java.net.URL(
+                    "https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=jsonv2&limit=10&addressdetails=1&namedetails=1&polygon_geojson=1&accept-language=$encodedLanguage"
+                )
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 15000
                 connection.readTimeout = 20000
-                connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (Android)")
+                connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+                connection.setRequestProperty("Accept-Language", languageTag)
                 val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
-                if (results.length() == 0) throw IllegalStateException("لم يتم العثور على المكان")
+                if (results.length() == 0) throw IllegalStateException(
+                    if (deviceLocale.language == "ar") "لم يتم العثور على نتيجة. جرّب اسم الشارع أو الحي أو المدينة." 
+                    else "No matching place found. Try a street, district, city or region name."
+                )
+                // Nominatim returns the most relevant matches first.
                 results.getJSONObject(0)
             }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     searching = false
                     searchMessage = result.optString("display_name", query)
                     val map = mapLibreMap
-                    val countryResult = result.optString("addresstype") == "country" ||
-                        result.optString("type") == "country"
-                    val countrySource = map?.style?.getSource("horus-country-source") as? org.maplibre.android.style.sources.GeoJsonSource
-                    if (countryResult) {
-                        val geometry = result.optJSONObject("geojson")
-                        if (geometry != null) {
-                            countrySource?.setGeoJson(geometry.toString())
-                        }
-                        val bbox = result.optJSONArray("boundingbox")
-                        if (bbox != null && bbox.length() >= 4) {
+                    val addressType = result.optString("addresstype").lowercase(java.util.Locale.ROOT)
+                    val osmType = result.optString("type").lowercase(java.util.Locale.ROOT)
+                    val isCountry = addressType == "country" || osmType == "country"
+                    val isAdministrativeArea = isCountry || addressType in setOf(
+                        "state", "province", "region", "county", "state_district",
+                        "municipality", "administrative", "district"
+                    ) || (osmType == "administrative" && addressType !in setOf("road", "house", "house_number"))
+
+                    val boundarySource = map?.style?.getSource("horus-country-source")
+                        as? org.maplibre.android.style.sources.GeoJsonSource
+                    val geometry = result.optJSONObject("geojson")
+                    val geometryType = geometry?.optString("type")
+                    val hasAreaGeometry = geometry != null &&
+                        geometryType in setOf("Polygon", "MultiPolygon")
+
+                    if (isAdministrativeArea && hasAreaGeometry) {
+                        boundarySource?.setGeoJson(geometry.toString())
+                    } else {
+                        boundarySource?.setGeoJson(
+                            org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+                        )
+                    }
+
+                    val bbox = result.optJSONArray("boundingbox")
+                    if (isAdministrativeArea && bbox != null && bbox.length() >= 4) {
+                        runCatching {
                             val south = bbox.getString(0).toDouble()
                             val north = bbox.getString(1).toDouble()
                             val west = bbox.getString(2).toDouble()
@@ -909,20 +938,35 @@ private fun DashboardScreen(accountName: String) {
                                 .include(org.maplibre.android.geometry.LatLng(north, east))
                                 .build()
                             map?.animateCamera(
-                                org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(bounds, 90)
+                                org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(
+                                    bounds, 90
+                                )
                             )
-                        } else {
+                        }.onFailure {
                             map?.animateCamera(
                                 org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                                    org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon")), 5.0
+                                    org.maplibre.android.geometry.LatLng(
+                                        result.getDouble("lat"), result.getDouble("lon")
+                                    ), if (isCountry) 5.0 else 9.0
                                 )
                             )
                         }
                     } else {
-                        countrySource?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf()))
+                        val zoom = when (addressType) {
+                            "country" -> 5.0
+                            "state", "province", "region", "county", "state_district",
+                            "municipality", "administrative" -> 9.5
+                            "city", "town", "village", "hamlet" -> 12.5
+                            "suburb", "neighbourhood", "quarter", "borough", "district" -> 14.5
+                            "road", "street", "pedestrian", "residential", "house",
+                            "house_number" -> 17.0
+                            else -> if (osmType == "street") 17.0 else 14.5
+                        }
                         map?.animateCamera(
                             org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                                org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon")), 14.5
+                                org.maplibre.android.geometry.LatLng(
+                                    result.getDouble("lat"), result.getDouble("lon")
+                                ), zoom
                             )
                         )
                     }
@@ -930,7 +974,11 @@ private fun DashboardScreen(accountName: String) {
             }.onFailure { error ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     searching = false
-                    searchMessage = error.message ?: "تعذر البحث عن المكان"
+                    searchMessage = error.message ?: if (deviceLocale.language == "ar") {
+                        "تعذر البحث عن المكان"
+                    } else {
+                        "Could not search for this place"
+                    }
                 }
             }
         }.start()
@@ -1047,6 +1095,32 @@ private fun DashboardScreen(accountName: String) {
     }
 
     fun installMapLayers(style: org.maplibre.android.maps.Style) {
+        // Only render labels that have a translation for the device language.
+        // Do not fall back to the generic OSM name, which may be in another language.
+        val locale = java.util.Locale.getDefault()
+        val language = locale.language.lowercase(java.util.Locale.ROOT)
+        val languageTag = locale.toLanguageTag().replace("-", "-")
+        val localizedNameKeys = linkedSetOf(
+            "name:$languageTag", "name_$languageTag",
+            "name:$language", "name_$language"
+        ).toList()
+        style.layers.filterIsInstance<org.maplibre.android.style.layers.SymbolLayer>().forEach { symbolLayer ->
+            val originalTextExpression = runCatching {
+                symbolLayer.getTextField().getExpression()?.toString().orEmpty()
+            }.getOrDefault("")
+            if (originalTextExpression.contains("name", ignoreCase = true)) {
+                val localizedNameExpressions = localizedNameKeys.map {
+                    org.maplibre.android.style.expressions.Expression.get(it)
+                }.toTypedArray()
+                symbolLayer.setProperties(
+                    org.maplibre.android.style.layers.PropertyFactory.textField(
+                        org.maplibre.android.style.expressions.Expression.coalesce(
+                            localizedNameExpressions
+                        )
+                    )
+                )
+            }
+        }
         if (style.getSource("horus-country-source") == null) {
             style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
                 "horus-country-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
@@ -1168,7 +1242,7 @@ private fun DashboardScreen(accountName: String) {
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        placeholder = { Text("ابحث عن مكان أو مدينة", fontSize = 12.sp) },
+                        placeholder = { Text(if (java.util.Locale.getDefault().language == "ar") "ابحث عن دولة أو محافظة أو مدينة أو حي أو شارع" else "Search countries, regions, cities, districts or streets", fontSize = 12.sp) },
                         leadingIcon = { Icon(Icons.Outlined.Search, "بحث", tint = Blue, modifier = Modifier.size(19.dp)) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { searchPlace() })
