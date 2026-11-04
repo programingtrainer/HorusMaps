@@ -1425,7 +1425,7 @@ private fun DashboardScreen(accountName: String) {
             routeMessage = localizedUiText("اكتب مكان الوصول أولًا", "Enter a destination first")
             return
         }
-        if (!hasLocationPermission && routeOriginText.contains("موقعي", true)) {
+        if (!hasLocationPermission && (routeOriginText.contains("موقعي", true) || routeOriginText.equals("my current location", true) || routeOriginText.equals("current location", true))) {
             routeMessage = localizedUiText("اسمح للتطبيق بالوصول إلى موقعك أو اكتب نقطة البداية", "Allow location access or enter a starting point")
             permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
             return
@@ -1769,6 +1769,12 @@ private fun DashboardScreen(accountName: String) {
                     remainingDistanceMeters = remaining
                     val fraction = (remaining / option.distanceMeters.coerceAtLeast(1.0)).coerceIn(0.0, 1.0)
                     remainingDurationSeconds = option.durationSeconds * fraction
+                    if (option.instructions.isNotEmpty()) {
+                        val progress = (1.0 - fraction).coerceIn(0.0, 1.0)
+                        val instructionIndex = (progress * option.instructions.size).toInt()
+                            .coerceIn(0, option.instructions.lastIndex)
+                        nextInstruction = option.instructions[instructionIndex]
+                    }
                     navigationStatus = if (nearestDistance > 90.0)
                         localizedUiText("خرجت عن المسار. جارٍ إعادة الحساب...", "You are off route. Recalculating...")
                     else localizedUiText("أنت على المسار", "You are on route")
