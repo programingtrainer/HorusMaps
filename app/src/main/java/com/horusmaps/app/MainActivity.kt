@@ -1097,27 +1097,21 @@ private fun DashboardScreen(accountName: String) {
     fun installMapLayers(style: org.maplibre.android.maps.Style) {
         // Only render labels that have a translation for the device language.
         // Do not fall back to the generic OSM name, which may be in another language.
-        val locale = java.util.Locale.getDefault()
-        val language = locale.language.lowercase(java.util.Locale.ROOT)
-        val languageTag = locale.toLanguageTag().replace("-", "-")
-        val localizedNameKeys = linkedSetOf(
-            "name:$languageTag", "name_$languageTag",
-            "name:$language", "name_$language"
-        ).toList()
+        val language = java.util.Locale.getDefault().language.lowercase(java.util.Locale.ROOT)
+        // OpenFreeMap/OpenMapTiles commonly expose both name:<lang> and name_<lang>.
+        // Deliberately do not fall back to the local-language "name" field: that
+        // would mix languages when a translation is unavailable.
+        val localizedNameExpression = org.maplibre.android.style.expressions.Expression.coalesce(
+            org.maplibre.android.style.expressions.Expression.get("name:$language"),
+            org.maplibre.android.style.expressions.Expression.get("name_$language")
+        )
         style.layers.filterIsInstance<org.maplibre.android.style.layers.SymbolLayer>().forEach { symbolLayer ->
             val originalTextExpression = runCatching {
                 symbolLayer.getTextField().getExpression()?.toString().orEmpty()
             }.getOrDefault("")
             if (originalTextExpression.contains("name", ignoreCase = true)) {
-                val localizedNameExpressions = localizedNameKeys.map {
-                    org.maplibre.android.style.expressions.Expression.get(it)
-                }.toTypedArray()
                 symbolLayer.setProperties(
-                    org.maplibre.android.style.layers.PropertyFactory.textField(
-                        org.maplibre.android.style.expressions.Expression.coalesce(
-                            localizedNameExpressions
-                        )
-                    )
+                    org.maplibre.android.style.layers.PropertyFactory.textField(localizedNameExpression)
                 )
             }
         }
