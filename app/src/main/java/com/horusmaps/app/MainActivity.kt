@@ -1,9 +1,9 @@
 package com.horusmaps.app
 
-import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import android.os.Bundle
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -732,12 +732,64 @@ private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
 
 @Composable
 private fun DashboardScreen(accountName: String) {
-    Box(Modifier.fillMaxSize().background(Ice).padding(24.dp)) {
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(painterResource(R.drawable.horus_logo), null, modifier = Modifier.size(120.dp))
-            Spacer(Modifier.height(18.dp)); Text("مرحبًا $accountName", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Navy)
-            Text("لوحة تحكم Horus Maps", color = Color(0xFF667085), modifier = Modifier.padding(top = 8.dp))
+    val context = LocalContext.current
+    Box(Modifier.fillMaxSize().background(Color(0xFFE8EEF4))) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { viewContext ->
+                org.maplibre.android.MapLibre.getInstance(viewContext)
+                org.maplibre.android.maps.MapView(viewContext).apply {
+                    onCreate(null)
+                    onResume()
+                    getMapAsync { map ->
+                        map.setStyle("https://tiles.openfreemap.org/styles/liberty") {
+                            map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                                .target(org.maplibre.android.geometry.LatLng(30.0444, 31.2357))
+                                .zoom(11.0)
+                                .build()
+                        }
+                    }
+                }
+            },
+            update = { }
+        )
+
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 4.dp) {
+                    Image(painterResource(R.drawable.horus_logo), null, Modifier.size(52.dp).padding(6.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+                Surface(shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 4.dp, modifier = Modifier.weight(1f).height(52.dp)) {
+                    Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Search, "بحث", tint = Color(0xFF667085))
+                        Spacer(Modifier.width(10.dp))
+                        Text("ابحث عن مكان أو عنوان", color = Color(0xFF667085), fontSize = 15.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            Surface(shape = RoundedCornerShape(24.dp, 24.dp, 0.dp, 0.dp), color = Color.White, shadowElevation = 12.dp) {
+                Row(Modifier.fillMaxWidth().height(76.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    DashboardNavItem(Icons.Outlined.Search, "الخريطة", true)
+                    DashboardNavItem(Icons.Outlined.Visibility, "المسارات", false)
+                    DashboardNavItem(Icons.Outlined.VisibilityOff, "المحفوظات", false)
+                    DashboardNavItem(Icons.Outlined.Close, "حسابي", false)
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun DashboardNavItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, label, tint = if (selected) Blue else Color(0xFF667085))
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = if (selected) Blue else Color(0xFF667085), fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
     }
 }
 

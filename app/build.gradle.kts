@@ -41,5 +41,6 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("org.maplibre.gl:android-sdk:11.8.0")
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
