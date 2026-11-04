@@ -2169,7 +2169,7 @@ private fun DashboardScreen(accountName: String) {
                         val categories = listOf(
                             Triple("all", localizedUiText("الكل", "All"), "⌕"),
                             Triple("food", localizedUiText("مطاعم وكافيهات", "Food & cafes"), "◆"),
-                            Triple("fuel", localizedUiText("بنزين", "Fuel"), "⛽"),
+                            Triple("fuel", localizedUiText("محطات بنزين", "Gas stations"), "⛽"),
                             Triple("health", localizedUiText("مستشفيات وصيدليات", "Health"), "✚"),
                             Triple("parks", localizedUiText("منتزهات", "Parks"), "♣"),
                             Triple("shopping", localizedUiText("تسوق", "Shopping"), "▦"),
@@ -2355,9 +2355,18 @@ private fun DashboardScreen(accountName: String) {
             }
         }
 
-        if (selectedTab == localizedUiText("المحفوظات", "Saved") || selectedTab == localizedUiText("المسارات", "Routes") || selectedTab == localizedUiText("حسابي", "My account")) {
+        AnimatedVisibility(
+            visible = selectedTab == localizedUiText("المحفوظات", "Saved") || selectedTab == localizedUiText("المسارات", "Routes") || selectedTab == localizedUiText("حسابي", "My account"),
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
+            enter = fadeIn(tween(220)) +
+                expandVertically(tween(300, easing = FastOutSlowInEasing)) +
+                androidx.compose.animation.slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 4 },
+            exit = androidx.compose.animation.fadeOut(tween(150)) +
+                androidx.compose.animation.shrinkVertically(tween(190)) +
+                androidx.compose.animation.slideOutVertically(tween(190)) { it / 5 }
+        ) {
             Surface(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
+                Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 5.dp
             ) {
                 Column(Modifier.padding(15.dp).heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
