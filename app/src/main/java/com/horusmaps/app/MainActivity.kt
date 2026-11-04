@@ -931,13 +931,16 @@ private fun findNearbyAirports(point: org.maplibre.android.geometry.LatLng): Lis
 private fun buildFlightEstimate(
     origin: org.maplibre.android.geometry.LatLng,
     destination: org.maplibre.android.geometry.LatLng
-): FlightEstimate {
+): FlightEstimate? {
+    // A flight option is not meaningful for nearby streets, districts, or short urban trips.
+    if (straightLineMeters(origin, destination) < 100_000.0) return null
+
     val originAirports = runCatching { findNearbyAirports(origin) }.getOrDefault(emptyList())
     val destinationAirports = runCatching { findNearbyAirports(destination) }.getOrDefault(emptyList())
     var chosenOrigin: AirportCandidate? = originAirports.firstOrNull()
     var chosenDestination: AirportCandidate? = destinationAirports.firstOrNull()
     var scheduledRouteKm: Double? = null
-    var routeHasOpenTrafficEvidence = false
+    var hasDirectRouteEvidence = false
 
     // Prefer a documented nonstop airport pair when the open route dataset contains one.
     for (from in originAirports.take(5)) {
@@ -953,7 +956,7 @@ private fun buildFlightEstimate(
                 chosenOrigin = from
                 chosenDestination = to
                 scheduledRouteKm = matching.optDouble("km").takeIf { it > 0.0 }
-                routeHasOpenTrafficEvidence = scheduledRouteKm != null
+                hasDirectRouteEvidence = true
                 break
             }
         }
@@ -962,6 +965,10 @@ private fun buildFlightEstimate(
 
     val fromAirport = chosenOrigin
     val toAirport = chosenDestination
+    // Only offer air travel when both airports are known and the open airport dataset
+    // contains evidence for a direct airport pair. This is not proof of a live flight.
+    if (fromAirport == null || toAirport == null || !hasDirectRouteEvidence) return null
+
     val flightDistance = if (scheduledRouteKm != null) scheduledRouteKm!! * 1000.0
         else if (fromAirport != null && toAirport != null) straightLineMeters(
             org.maplibre.android.geometry.LatLng(fromAirport.latitude, fromAirport.longitude),
@@ -978,22 +985,10 @@ private fun buildFlightEstimate(
         if (toAirport != null) add(org.maplibre.geojson.Point.fromLngLat(toAirport.longitude, toAirport.latitude))
         else add(org.maplibre.geojson.Point.fromLngLat(destination.longitude, destination.latitude))
     }
-    val details = when {
-        fromAirport != null && toAirport != null && routeHasOpenTrafficEvidence ->
-            localizedUiText(
-                "من ${fromAirport.name} (${fromAirport.iata}) إلى ${toAirport.name} (${toAirport.iata}). يوجد مسار جوي مباشر في بيانات المطارات المفتوحة. الزمن تقديري ولا يمثل موعد رحلة.",
-                "From ${fromAirport.name} (${fromAirport.iata}) to ${toAirport.name} (${toAirport.iata}). An open-data nonstop route is listed. Duration is estimated, not a flight schedule."
-            )
-        fromAirport != null && toAirport != null ->
-            localizedUiText(
-                "أقرب مطار: ${fromAirport.name} (${fromAirport.iata})، والوجهة: ${toAirport.name} (${toAirport.iata}). لم يتم التحقق من رحلة مباشرة؛ المسافة والزمن تقدير جوي.",
-                "Nearest airports: ${fromAirport.name} (${fromAirport.iata}) and ${toAirport.name} (${toAirport.iata}). A nonstop flight was not verified; distance and time are air estimates."
-            )
-        else -> localizedUiText(
-            "تعذر تحديد مطارات مناسبة من بيانات المطارات؛ المعروض تقدير بخط جوي مباشر فقط.",
-            "Suitable airports could not be identified; this is only a straight-line air estimate."
-        )
-    }
+    val details = localizedUiText(
+        "من ${fromAirport.name} (${fromAirport.iata}) إلى ${toAirport.name} (${toAirport.iata}). توجد إشارة لمسار مباشر في بيانات المطارات المفتوحة؛ هذا لا يؤكد تشغيل رحلة حاليًا. الزمن تقديري وليس جدول رحلات.",
+        "From ${fromAirport.name} (${fromAirport.iata}) to ${toAirport.name} (${toAirport.iata}). The open airport dataset lists a direct route; this does not confirm a currently operating flight. Duration is an estimate, not a timetable."
+    )
     return FlightEstimate(
         distanceMeters = flightDistance,
         durationSeconds = duration,
@@ -1596,16 +1591,17 @@ private fun DashboardScreen(accountName: String) {
                 try { options.add(requestValhallaRoute(origin, destination, "pedestrian")) }
                 catch (_: Exception) { failures.add(localizedUiText("لا يوجد مسار مشي بري متصل أو تعذر حسابه", "No connected walking route was found, or pedestrian routing failed")) }
 
-                // Always show an air option. Prefer nearby airports and an open-data nonstop route.
-                val flight = buildFlightEstimate(origin, destination)
-                options.add(RouteOption(
-                    mode = "flight",
-                    distanceMeters = flight.distanceMeters,
-                    durationSeconds = flight.durationSeconds,
-                    geometry = flight.geometry,
-                    isEstimate = true,
-                    details = flight.details
-                ))
+                // Air travel is only offered for intercity-scale trips with a verified airport pair.
+                buildFlightEstimate(origin, destination)?.let { flight ->
+                    options.add(RouteOption(
+                        mode = "flight",
+                        distanceMeters = flight.distanceMeters,
+                        durationSeconds = flight.durationSeconds,
+                        geometry = flight.geometry,
+                        isEstimate = true,
+                        details = flight.details
+                    ))
+                }
                 if (options.isEmpty()) throw IllegalStateException(failures.joinToString(" • ").ifBlank { "No routes found" })
                 Triple(origin, destination, options)
             }.onSuccess { result ->
