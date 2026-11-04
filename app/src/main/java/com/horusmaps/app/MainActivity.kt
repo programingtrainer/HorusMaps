@@ -999,7 +999,7 @@ private fun DashboardScreen(accountName: String) {
                             org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
                                 org.maplibre.android.camera.CameraPosition.Builder()
                                     .target(org.maplibre.android.geometry.LatLng(location.latitude, location.longitude))
-                                    .zoom(17.0).tilt(if (threeDMode) 60.0 else 45.0).bearing(bearing).build()
+                                    .zoom(17.0).tilt(if (threeDMode) 60.0 else 0.0).bearing(bearing).build()
                             ), 700
                         )
                     }
@@ -1507,7 +1507,7 @@ private fun DashboardScreen(accountName: String) {
         currentLocation?.let { location ->
             mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
                 org.maplibre.android.camera.CameraPosition.Builder().target(location).zoom(17.0)
-                    .tilt(if (threeDMode) 60.0 else 45.0).build()
+                    .tilt(if (threeDMode) 60.0 else 0.0).build()
             ), 800)
         }
     }
@@ -2042,6 +2042,8 @@ private fun DashboardScreen(accountName: String) {
                                 }
                                 Text(localizedUiText("🚆 القطار: لا تتوفر حاليًا بيانات مواعيد ومسارات قطارات موثوقة لهذه المنطقة.", "🚆 Train: reliable rail schedules and routes are not currently available for this area."),
                                     color = Color(0xFF98A2B3), fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                                Text(localizedUiText("أوقات السيارة والمشي تقديرية حسب بيانات الطرق، ولا تتضمن ازدحامًا مروريًا مباشرًا.", "Car and walking times are estimates from road data and do not include live traffic."),
+                                    color = Color(0xFF98A2B3), fontSize = 9.sp)
                                 if (routeOptions.firstOrNull { it.mode == selectedRouteMode }?.isEstimate == true) {
                                     Text(localizedUiText("زمن الطيران تقديري بخط جوي مباشر، ولا يمثل رحلة أو موعدًا فعليًا.", "Flight time is a straight-line estimate, not an actual scheduled flight."),
                                         color = Color(0xFFB54708), fontSize = 9.sp)
