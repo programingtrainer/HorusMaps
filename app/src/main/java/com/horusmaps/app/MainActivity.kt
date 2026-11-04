@@ -779,6 +779,11 @@ private data class NearbyPlace(
     val category: String
 )
 
+private data class RouteGeocodeResult(
+    val point: org.maplibre.android.geometry.LatLng,
+    val supportsFlight: Boolean
+)
+
 private data class RouteOption(
     val mode: String,
     val distanceMeters: Double,
@@ -1533,7 +1538,7 @@ private fun DashboardScreen(accountName: String) {
                 }
                 val nameFilter = searchTerm.trim().takeIf { it.isNotBlank() }?.let { raw ->
                     val safe = raw.filter { it.isLetterOrDigit() || it.isWhitespace() || it == '-' }
-                    """[name~"$safe",i]"""
+                    """[~"^(name(:.*)?|brand(:.*)?|operator(:.*)?)$"~"$safe",i]"""
                 } ?: "[name]"
                 val selectors = categoryFilters.joinToString("") { filter ->
                     "nwr(around:$radiusMeters,$lat,$lon)$filter$nameFilter;"
@@ -1555,6 +1560,8 @@ private fun DashboardScreen(accountName: String) {
                     val item = elements.optJSONObject(index) ?: continue
                     val tags = item.optJSONObject("tags") ?: continue
                     val name = tags.optString("name").trim()
+                        .ifBlank { tags.optString("brand").trim() }
+                        .ifBlank { tags.optString("operator").trim() }
                     if (name.isBlank()) continue
                     val center = item.optJSONObject("center")
                     val placeLat = if (item.has("lat")) item.optDouble("lat") else center?.optDouble("lat") ?: Double.NaN
@@ -1606,7 +1613,7 @@ private fun DashboardScreen(accountName: String) {
     }
 
 
-    fun geocodeRoutePoint(query: String): org.maplibre.android.geometry.LatLng {
+    fun geocodeRoutePoint(query: String): RouteGeocodeResult {
         synchronized(nominatimRequestLock) {
             val elapsed = System.currentTimeMillis() - lastNominatimRequestAt
             if (elapsed < 1_000L) Thread.sleep(1_000L - elapsed)
@@ -1623,7 +1630,18 @@ private fun DashboardScreen(accountName: String) {
         val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
         if (results.length() == 0) throw IllegalStateException(localizedUiText("لم يتم العثور على المكان", "Place not found"))
         val result = results.getJSONObject(0)
-        return org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon"))
+        val addressType = result.optString("addresstype").lowercase(java.util.Locale.ROOT)
+        val resultType = result.optString("type").lowercase(java.util.Locale.ROOT)
+        val flightSuitableTypes = setOf(
+            "country", "state", "province", "region", "county", "state_district",
+            "municipality", "city", "town", "village"
+        )
+        val supportsFlight = addressType in flightSuitableTypes ||
+            (resultType == "administrative" && addressType !in setOf("road", "house", "house_number", "suburb", "neighbourhood"))
+        return RouteGeocodeResult(
+            point = org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon")),
+            supportsFlight = supportsFlight
+        )
     }
 
     fun calculateJourney() {
@@ -1644,12 +1662,20 @@ private fun DashboardScreen(accountName: String) {
         val selectedPlaceDestination = selectedPlace?.takeIf { it.name.equals(routeDestinationText.trim(), ignoreCase = true) }
         Thread {
             runCatching {
-                val origin = if (routeOriginText.contains("موقعي", true) || routeOriginText.equals("current location", true) || routeOriginText.equals("my location", true)) {
-                    currentLocation ?: throw IllegalStateException(localizedUiText("لم يتم تحديد موقعك بعد", "Your location is not available yet"))
+                val originResult = if (routeOriginText.contains("موقعي", true) || routeOriginText.equals("current location", true) || routeOriginText.equals("my location", true)) {
+                    RouteGeocodeResult(
+                        currentLocation ?: throw IllegalStateException(localizedUiText("لم يتم تحديد موقعك بعد", "Your location is not available yet")),
+                        supportsFlight = true
+                    )
                 } else geocodeRoutePoint(routeOriginText)
-                val destination = selectedPlaceDestination?.let {
-                    org.maplibre.android.geometry.LatLng(it.latitude, it.longitude)
+                val destinationResult = selectedPlaceDestination?.let {
+                    RouteGeocodeResult(
+                        org.maplibre.android.geometry.LatLng(it.latitude, it.longitude),
+                        supportsFlight = false
+                    )
                 } ?: geocodeRoutePoint(routeDestinationText)
+                val origin = originResult.point
+                val destination = destinationResult.point
                 val options = ArrayList<RouteOption>()
                 val failures = ArrayList<String>()
                 // Each land mode is attempted for every geocoded destination, including countries and regions.
@@ -1659,7 +1685,8 @@ private fun DashboardScreen(accountName: String) {
                 catch (_: Exception) { failures.add(localizedUiText("لا يوجد مسار مشي بري متصل أو تعذر حسابه", "No connected walking route was found, or pedestrian routing failed")) }
 
                 // Air travel is only offered for intercity-scale trips with a verified airport pair.
-                buildFlightEstimate(origin, destination)?.let { flight ->
+                if (originResult.supportsFlight && destinationResult.supportsFlight) {
+                    buildFlightEstimate(origin, destination)?.let { flight ->
                     options.add(RouteOption(
                         mode = "flight",
                         distanceMeters = flight.distanceMeters,
@@ -1668,6 +1695,7 @@ private fun DashboardScreen(accountName: String) {
                         isEstimate = true,
                         details = flight.details
                     ))
+                    }
                 }
                 if (options.isEmpty()) throw IllegalStateException(failures.joinToString(" • ").ifBlank { "No routes found" })
                 Triple(origin, destination, options)
