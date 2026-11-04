@@ -165,8 +165,8 @@ class MainActivity : ComponentActivity() {
                                 })
                                 AppScreen.Dashboard -> DashboardScreen(accountName = accountName)
                                 AppScreen.Login -> LoginScreen(onBack = { currentScreen = AppScreen.Welcome }, onLoginSuccess = { name -> accountName = name; currentScreen = AppScreen.Dashboard }, onCreateAccount = { currentScreen = AppScreen.CreateAccount })
-                                AppScreen.Terms -> LegalScreen(title = "شروط الاستخدام", onBack = { currentScreen = AppScreen.CreateAccount })
-                                AppScreen.Privacy -> LegalScreen(title = "سياسة الخصوصية", onBack = { currentScreen = AppScreen.CreateAccount })
+                                AppScreen.Terms -> LegalScreen(title = localizedUiText("شروط الاستخدام", "Terms of Use"), onBack = { currentScreen = AppScreen.CreateAccount })
+                                AppScreen.Privacy -> LegalScreen(title = localizedUiText("سياسة الخصوصية", "Privacy Policy"), onBack = { currentScreen = AppScreen.CreateAccount })
                             }
                         }
                     }
@@ -290,7 +290,7 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
             ) {
                 Image(
                     painter = painterResource(R.drawable.horus_logo),
-                    contentDescription = "شعار Horus Maps",
+                    contentDescription = localizedUiText("شعار Horus Maps", "Horus Maps logo"),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().padding(8.dp)
                 )
@@ -308,7 +308,7 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "أهلاً بك في Horus Maps",
+                    text = localizedUiText("أهلاً بك في Horus Maps", "Welcome to Horus Maps"),
                     color = Navy,
                     fontSize = 27.sp,
                     fontWeight = FontWeight.Bold,
@@ -316,7 +316,7 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "استكشف العالم من حولك، واعثر على الأماكن، وخطط رحلتك بسهولة",
+                    text = localizedUiText("استكشف العالم من حولك، واعثر على الأماكن، وخطط رحلتك بسهولة", "Explore the world around you, find places, and plan your journey with ease"),
                     color = Color(0xFF667085),
                     fontSize = 16.sp,
                     lineHeight = 24.sp,
@@ -341,7 +341,7 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(containerColor = Blue),
                     modifier = Modifier.fillMaxWidth().height(54.dp)
                 ) {
-                    Text("إنشاء حساب", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(localizedUiText("إنشاء حساب", "Create account"), fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
@@ -350,7 +350,7 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().height(54.dp)
                 ) {
                     Text(
-                        "تسجيل الدخول",
+                        localizedUiText("تسجيل الدخول", "Log in"),
                         color = Navy,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
@@ -360,7 +360,7 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
 
             Spacer(modifier = Modifier.height(18.dp))
             Text(
-                text = "بالاستمرار، أنت توافق على شروط الاستخدام وسياسة الخصوصية",
+                text = localizedUiText("بالاستمرار، أنت توافق على شروط الاستخدام وسياسة الخصوصية", "By continuing, you agree to the Terms of Use and Privacy Policy"),
                 color = Color(0xFF98A2B3),
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
@@ -370,6 +370,19 @@ private fun WelcomeScreen(onCreateAccount: () -> Unit, onLogin: () -> Unit) {
 }
 
 private data class Country(val name: String, val dialCode: String)
+
+private fun localizedCountries(): List<Country> {
+    val locale = java.util.Locale.getDefault()
+    val arabicLocale = java.util.Locale("ar")
+    return countries.map { country ->
+        val isoCode = java.util.Locale.getISOCountries().firstOrNull { code ->
+            java.util.Locale("", code).getDisplayCountry(arabicLocale).equals(country.name, ignoreCase = true)
+        }
+        val displayName = isoCode?.let { java.util.Locale("", it).getDisplayCountry(locale) }
+            ?.takeIf { it.isNotBlank() } ?: country.name
+        Country(displayName, country.dialCode)
+    }.distinctBy { it.dialCode + it.name }.sortedBy { it.name }
+}
 
 private val countries = listOf(
     Country("أفغانستان", "+93"), Country("ألبانيا", "+355"), Country("الجزائر", "+213"), Country("أندورا", "+376"),
@@ -405,6 +418,9 @@ private val countries = listOf(
     Country("فيتنام", "+84"), Country("اليمن", "+967"), Country("زامبيا", "+260"), Country("زيمبابوي", "+263")
 ).distinctBy { it.name }.sortedBy { it.name }
 
+private fun localizedUiText(arabic: String, english: String): String =
+    if (java.util.Locale.getDefault().language == "ar") arabic else english
+
 private fun passwordScore(password: String): Int {
     var score = 0
     if (password.length >= 8) score++
@@ -416,10 +432,10 @@ private fun passwordScore(password: String): Int {
 }
 
 @Composable
-private fun CountryPicker(selected: Country, onSelect: (Country) -> Unit, onDismiss: () -> Unit) {
+private fun CountryPicker(selected: Country, availableCountries: List<Country>, onSelect: (Country) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     val normalizedQuery = query.trim().replace(Regex("\\s+"), "")
-    val filteredCountries = if (normalizedQuery.isEmpty()) countries else countries.filter { country ->
+    val filteredCountries = if (normalizedQuery.isEmpty()) availableCountries else availableCountries.filter { country ->
         country.name.replace(Regex("\\s+"), "").contains(normalizedQuery, ignoreCase = true) ||
             country.dialCode.contains(normalizedQuery)
     }
@@ -433,12 +449,12 @@ private fun CountryPicker(selected: Country, onSelect: (Country) -> Unit, onDism
             Column(modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp).padding(horizontal = 18.dp, vertical = 16.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("اختر دولتك", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Navy)
+                        Text(localizedUiText("اختر دولتك", "Choose your country"), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Navy)
                         Spacer(Modifier.height(4.dp))
-                        Text("جميع الدول مرتبة أبجديًا", color = Color(0xFF667085), fontSize = 13.sp)
+                        Text(localizedUiText("جميع الدول مرتبة أبجديًا", "All countries in alphabetical order"), color = Color(0xFF667085), fontSize = 13.sp)
                     }
                     IconButton(onClick = onDismiss) {
-                        Icon(imageVector = Icons.Outlined.Close, contentDescription = "إغلاق قائمة الدول", tint = Navy)
+                        Icon(imageVector = Icons.Outlined.Close, contentDescription = localizedUiText("إغلاق قائمة الدول", "Close country list"), tint = Navy)
                     }
                 }
                 Spacer(Modifier.height(14.dp))
@@ -449,7 +465,7 @@ private fun CountryPicker(selected: Country, onSelect: (Country) -> Unit, onDism
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
                     leadingIcon = { Icon(imageVector = Icons.Outlined.Search, contentDescription = null, tint = Blue) },
-                    placeholder = { Text("ابحث عن الدولة") }
+                    placeholder = { Text(localizedUiText("ابحث عن الدولة", "Search for a country")) }
                 )
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Top) {
@@ -476,7 +492,7 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
     var firstName by remember { mutableStateOf("") }
     var familyName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var country by remember { mutableStateOf(countries.first { it.name == "مصر" }) }
+    val availableCountries = remember { localizedCountries() }\n    var country by remember { mutableStateOf(availableCountries.first { it.dialCode == "+20" }) }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var confirmPassword by remember { mutableStateOf("") }
@@ -492,7 +508,7 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
         pageAlpha.animateTo(1f, tween(500))
         pageOffset.animateTo(0f, tween(500, easing = FastOutSlowInEasing))
     }
-    if (showCountryPicker) CountryPicker(country, { country = it }) { showCountryPicker = false }
+    if (showCountryPicker) CountryPicker(country, availableCountries, { country = it }) { showCountryPicker = false }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFF8FAFC))) {
         Column(
@@ -501,16 +517,16 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
         ) {
             Box(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onBack) { Text("العودة", color = Navy, fontWeight = FontWeight.SemiBold) }
+                    TextButton(onClick = onBack) { Text(localizedUiText("العودة", "Back"), color = Navy, fontWeight = FontWeight.SemiBold) }
                     Spacer(Modifier.weight(1f))
                     Image(painterResource(R.drawable.horus_logo), null, Modifier.size(44.dp))
                 }
             }
 
             Column(Modifier.padding(horizontal = 20.dp)) {
-                Text("أنشئ حسابك", color = Navy, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text(localizedUiText("أنشئ حسابك", "Create your account"), color = Navy, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
-                Text("خطوات بسيطة، واستكشف العالم من حولك.", color = Color(0xFF667085), fontSize = 15.sp)
+                Text(localizedUiText("خطوات بسيطة، واستكشف العالم من حولك.", "A few simple steps, then explore the world around you."), color = Color(0xFF667085), fontSize = 15.sp)
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth().height(3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(Modifier.weight(1f).fillMaxSize().background(Blue, RoundedCornerShape(8.dp)))
@@ -518,16 +534,16 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                     Box(Modifier.weight(1f).fillMaxSize().background(Color(0xFFDDE5EF), RoundedCornerShape(8.dp)))
                 }
                 Spacer(Modifier.height(24.dp))
-                Text("بياناتك الشخصية", color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(localizedUiText("بياناتك الشخصية", "Personal information"), color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(value = firstName, onValueChange = { firstName = it.take(30) }, label = { Text("الاسم الأول") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
+                OutlinedTextField(value = firstName, onValueChange = { firstName = it.take(30) }, label = { Text(localizedUiText("الاسم الأول", "First name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(value = familyName, onValueChange = { familyName = it.take(30) }, label = { Text("اسم العائلة") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
+                OutlinedTextField(value = familyName, onValueChange = { familyName = it.take(30) }, label = { Text(localizedUiText("اسم العائلة", "Last name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(onClick = { showCountryPicker = true }, modifier = Modifier.width(92.dp).height(56.dp), shape = RoundedCornerShape(14.dp)) { Text(country.dialCode, color = Navy, fontWeight = FontWeight.Bold) }
                     Spacer(Modifier.width(10.dp))
-                    OutlinedTextField(value = phone, onValueChange = { phone = it.filter(Char::isDigit) }, label = { Text("رقم الهاتف (اختياري)") }, modifier = Modifier.weight(1f), singleLine = true, shape = RoundedCornerShape(14.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+                    OutlinedTextField(value = phone, onValueChange = { phone = it.filter(Char::isDigit) }, label = { Text(localizedUiText("رقم الهاتف (اختياري)", "Phone number (optional)")) }, modifier = Modifier.weight(1f), singleLine = true, shape = RoundedCornerShape(14.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
                 }
                 Spacer(Modifier.height(12.dp))
                 Box(modifier = Modifier.fillMaxWidth().clickable(onClick = { showCountryPicker = true })) {
@@ -536,7 +552,7 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                         onValueChange = {},
                         readOnly = true,
                         enabled = false,
-                        label = { Text("البلد") },
+                        label = { Text(localizedUiText("البلد", "Country")) },
                         trailingIcon = { Text("⌄", color = Blue, fontSize = 18.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
@@ -550,12 +566,12 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                 }
 
                 Spacer(Modifier.height(24.dp))
-                Text("حماية حسابك", color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(localizedUiText("حماية حسابك", "Secure your account"), color = Navy, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("كلمة المرور") },
+                    label = { Text(localizedUiText("كلمة المرور", "Password")) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
@@ -565,7 +581,7 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                         IconButton(onClick = { showPassword = !showPassword }) {
                             Icon(
                                 imageVector = if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                contentDescription = if (showPassword) "إخفاء كلمة المرور" else "إظهار كلمة المرور",
+                                contentDescription = if (showPassword) localizedUiText("إخفاء كلمة المرور", "Hide password") else localizedUiText("إظهار كلمة المرور", "Show password"),
                                 tint = Color(0xFF667085)
                             )
                         }
@@ -577,7 +593,7 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                 OutlinedTextField(
                     value = confirmPassword,
                     onValueChange = { confirmPassword = it },
-                    label = { Text("تأكيد كلمة المرور") },
+                    label = { Text(localizedUiText("تأكيد كلمة المرور", "Confirm password")) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
@@ -588,7 +604,7 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                         IconButton(onClick = { showConfirmPassword = !showConfirmPassword }) {
                             Icon(
                                 imageVector = if (showConfirmPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                contentDescription = if (showConfirmPassword) "إخفاء تأكيد كلمة المرور" else "إظهار تأكيد كلمة المرور",
+                                contentDescription = if (showConfirmPassword) localizedUiText("إخفاء تأكيد كلمة المرور", "Hide password confirmation") else localizedUiText("إظهار تأكيد كلمة المرور", "Show password confirmation"),
                                 tint = Color(0xFF667085)
                             )
                         }
@@ -596,26 +612,26 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
                 )
                 if (confirmPassword.isNotEmpty() && confirmPassword != password) {
                     Spacer(Modifier.height(6.dp))
-                    Text("كلمتا المرور غير متطابقتين", color = Color(0xFFD92D20), fontSize = 13.sp)
+                    Text(localizedUiText("كلمتا المرور غير متطابقتين", "Passwords do not match"), color = Color(0xFFD92D20), fontSize = 13.sp)
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
                     Checkbox(checked = accepted, onCheckedChange = { accepted = it })
                     Column(Modifier.padding(top = 12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("أوافق على ", color = Navy, fontSize = 13.sp)
-                            Text("شروط الاستخدام", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onTerms))
-                            Text(" و", color = Navy, fontSize = 13.sp)
+                            Text(localizedUiText("أوافق على ", "I agree to "), color = Navy, fontSize = 13.sp)
+                            Text(localizedUiText("شروط الاستخدام", "Terms of Use"), color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onTerms))
+                            Text(localizedUiText(" و", " and "), color = Navy, fontSize = 13.sp)
                         }
-                        Text("سياسة الخصوصية", color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onPrivacy))
+                        Text(localizedUiText("سياسة الخصوصية", "Privacy Policy"), color = Blue, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onPrivacy))
                     }
                 }
                 Spacer(Modifier.height(18.dp))
                 Button(onClick = {
                     onNext(AccountDraft(firstName.trim(), familyName.trim(), phone, country.name, country.dialCode, password, confirmPassword))
-                }, enabled = canContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Blue, disabledContainerColor = Color(0xFFD0D5DD))) { Text("متابعة إلى البريد Horus", fontWeight = FontWeight.Bold) }
+                }, enabled = canContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Blue, disabledContainerColor = Color(0xFFD0D5DD))) { Text(localizedUiText("متابعة إلى البريد Horus", "Continue to Horus email"), fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.height(22.dp))
-                TextButton(onClick = onLogin, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("لديك حساب؟ تسجيل الدخول") }
+                TextButton(onClick = onLogin, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text(localizedUiText("لديك حساب؟ تسجيل الدخول", "Already have an account? Log in")) }
             }
         }
     }
@@ -623,9 +639,9 @@ private fun CreateAccountScreen(onNext: (AccountDraft) -> Unit, onBack: () -> Un
 
 @Composable
 private fun PasswordStrength(password: String, score: Int) {
-    val label = when { password.isEmpty() -> "أدخل كلمة مرور قوية"; score <= 2 -> "ضعيفة"; score == 3 -> "متوسطة"; score == 4 -> "قوية"; else -> "قوية جدًا" }
+    val label = when { password.isEmpty() -> localizedUiText("أدخل كلمة مرور قوية", "Enter a strong password"); score <= 2 -> localizedUiText("ضعيفة", "Weak"); score == 3 -> localizedUiText("متوسطة", "Medium"); score == 4 -> localizedUiText("قوية", "Strong"); else -> localizedUiText("قوية جدًا", "Very strong") }
     val color = when { score <= 2 -> Color(0xFFD92D20); score == 3 -> Color(0xFFF79009); else -> Color(0xFF12B76A) }
-    Text("قوة كلمة المرور: $label", color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    Text(localizedUiText("قوة كلمة المرور: $label", "Password strength: $label"), color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
 }
 
 @Composable
@@ -639,11 +655,11 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
     LaunchedEffect(handle) { checked = false; delay(600); checked = handle.length >= 3 }
     Box(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-            Text("اختر بريد Horus Maps", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
+            Text(localizedUiText("اختر بريد Horus Maps", "Choose your Horus Maps email"), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
             Text("سيكون عنوانك الرسمي لحساب $accountName", color = Color(0xFF667085), modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
-            OutlinedTextField(value = handle, onValueChange = { handle = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '.' || char == '_' } }, modifier = Modifier.fillMaxWidth(), singleLine = true, suffix = { Text("@horus.com") }, label = { Text("اسم البريد") })
+            OutlinedTextField(value = handle, onValueChange = { handle = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '.' || char == '_' } }, modifier = Modifier.fillMaxWidth(), singleLine = true, suffix = { Text("@horus.com") }, label = { Text(localizedUiText("اسم البريد", "Email username")) })
             Spacer(Modifier.height(12.dp))
-            Text(if (!checked) "" else if (available) "هذا الاسم متاح" else "لا يمكن استخدام هذا الاسم", color = if (available) Color(0xFF12B76A) else Color(0xFFD92D20))
+            Text(if (!checked) "" else if (available) localizedUiText("هذا الاسم متاح", "This username is available") else localizedUiText("لا يمكن استخدام هذا الاسم", "This username cannot be used"), color = if (available) Color(0xFF12B76A) else Color(0xFFD92D20))
             if (error.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 Text(error, color = Color(0xFFD92D20), fontSize = 13.sp, textAlign = TextAlign.Center)
@@ -679,15 +695,15 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
                                 loading = false
                                 if (result.optBoolean("ok")) onContinue()
                                 else error = when (result.optString("error")) {
-                                    "email_taken" -> "اسم البريد مستخدم بالفعل"
-                                    "invalid_password" -> "كلمة المرور لا تستوفي مستوى الحماية المطلوب"
-                                    else -> "تعذر إنشاء الحساب، حاول مرة أخرى"
+                                    "email_taken" -> localizedUiText("اسم البريد مستخدم بالفعل", "This email username is already taken")
+                                    "invalid_password" -> localizedUiText("كلمة المرور لا تستوفي مستوى الحماية المطلوب", "The password does not meet the required security level")
+                                    else -> localizedUiText("تعذر إنشاء الحساب، حاول مرة أخرى", "Could not create the account. Please try again.")
                                 }
                             }
                         }.onFailure {
                             android.os.Handler(android.os.Looper.getMainLooper()).post {
                                 loading = false
-                                error = "تعذر الاتصال بالخادم. تحقق من الإنترنت ثم حاول مرة أخرى"
+                                error = localizedUiText("تعذر الاتصال بالخادم. تحقق من الإنترنت ثم حاول مرة أخرى", "Could not connect to the server. Check your internet connection and try again.")
                             }
                         }
                     }.start()
@@ -695,8 +711,8 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
                 enabled = available && !loading,
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp)
-            ) { Text(if (loading) "جارٍ إنشاء الحساب..." else "إنشاء الحساب", fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("العودة") }
+            ) { Text(if (loading) localizedUiText("جارٍ إنشاء الحساب...", "Creating account...") else "إنشاء الحساب", fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text(localizedUiText("العودة", "Back")) }
         }
     }
 }
@@ -718,18 +734,18 @@ private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
             modifier = Modifier.alpha(contentAlpha.value).scale(contentScale.value)
         ) {
             Box(Modifier.size(112.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) {
-                Image(painterResource(R.drawable.horus_logo), "شعار Horus Maps", Modifier.fillMaxSize().padding(12.dp))
+                Image(painterResource(R.drawable.horus_logo), localizedUiText("شعار Horus Maps", "Horus Maps logo"), Modifier.fillMaxSize().padding(12.dp))
             }
             Spacer(Modifier.height(28.dp))
             Box(Modifier.size(54.dp).background(Color(0xFFE8F7FC), CircleShape), contentAlignment = Alignment.Center) {
                 Text("✓", color = Blue, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(18.dp))
-            Text("تم إنشاء حسابك بنجاح", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy, textAlign = TextAlign.Center)
+            Text(localizedUiText("تم إنشاء حسابك بنجاح", "Your account was created successfully"), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy, textAlign = TextAlign.Center)
             Spacer(Modifier.height(10.dp))
-            Text("أنت الآن جاهز لبدء رحلتك معنا، يا $accountName", fontSize = 16.sp, color = Color(0xFF667085), textAlign = TextAlign.Center)
+            Text(localizedUiText("أنت الآن جاهز لبدء رحلتك معنا، يا $accountName", "You are ready to start your journey, $accountName"), fontSize = 16.sp, color = Color(0xFF667085), textAlign = TextAlign.Center)
             Spacer(Modifier.height(36.dp))
-            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp)) { Text("استكشف Horus Maps", fontWeight = FontWeight.Bold) }
+            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp)) { Text(localizedUiText("استكشف Horus Maps", "Explore Horus Maps"), fontWeight = FontWeight.Bold) }
         }
     }
 }
@@ -757,7 +773,7 @@ private fun DashboardScreen(accountName: String) {
                 androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
         )
     }
-    var locationMessage by remember { mutableStateOf("نحتاج إذن الموقع لعرض مكانك والأماكن القريبة") }
+    var locationMessage by remember { mutableStateOf(localizedUiText("نحتاج إذن الموقع لعرض مكانك والأماكن القريبة", "Location permission is needed to show your position and nearby places")) }
     val mapPreferences = remember { context.getSharedPreferences("horus_map_data", android.content.Context.MODE_PRIVATE) }
     var currentLocation by remember {
         mutableStateOf(
@@ -796,7 +812,7 @@ private fun DashboardScreen(accountName: String) {
         hasLocationPermission =
             grants[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 grants[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        locationMessage = if (hasLocationPermission) "جارٍ تحديد موقعك..." else "إذن الموقع غير متاح. يمكنك تفعيله من إعدادات التطبيق."
+        locationMessage = if (hasLocationPermission) localizedUiText("جارٍ تحديد موقعك...", "Finding your location...") else localizedUiText("إذن الموقع غير متاح. يمكنك تفعيله من إعدادات التطبيق.", "Location permission is unavailable. You can enable it in app settings.")
     }
 
     LaunchedEffect(Unit) {
@@ -805,7 +821,7 @@ private fun DashboardScreen(accountName: String) {
         favorites = saved.mapNotNull { raw ->
             runCatching {
                 val json = org.json.JSONObject(raw)
-                NearbyPlace(json.getString("name"), json.getDouble("lat"), json.getDouble("lon"), json.optString("category", "مكان"))
+                NearbyPlace(json.getString("name"), json.getDouble("lat"), json.getDouble("lon"), json.optString("category", localizedUiText("مكان", "Place")))
             }.getOrNull()
         }
         kotlinx.coroutines.delay(90)
@@ -830,7 +846,7 @@ private fun DashboardScreen(accountName: String) {
                         .putFloat("last_lon", location.longitude.toFloat())
                         .apply()
                     hasFreshLocationFix = true
-                    locationMessage = "تم تحديد موقعك"
+                    locationMessage = localizedUiText("تم تحديد موقعك", "Your location was found")
                 }
             }
             try {
@@ -846,9 +862,9 @@ private fun DashboardScreen(accountName: String) {
                     }
                 }
             } catch (_: SecurityException) {
-                locationMessage = "تعذر الوصول إلى الموقع. راجع أذونات التطبيق."
+                locationMessage = localizedUiText("تعذر الوصول إلى الموقع. راجع أذونات التطبيق.", "Could not access your location. Check app permissions.")
             } catch (_: Exception) {
-                locationMessage = "خدمة تحديد الموقع غير متاحة حاليًا"
+                locationMessage = localizedUiText("خدمة تحديد الموقع غير متاحة حاليًا", "Location services are currently unavailable")
             }
             onDispose { runCatching { manager.removeUpdates(listener) } }
         }
@@ -893,7 +909,7 @@ private fun DashboardScreen(accountName: String) {
                 connection.setRequestProperty("Accept-Language", languageTag)
                 val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
                 if (results.length() == 0) throw IllegalStateException(
-                    if (deviceLocale.language == "ar") "لم يتم العثور على نتيجة. جرّب اسم الشارع أو الحي أو المدينة." 
+                    if (deviceLocale.language == "ar") localizedUiText("لم يتم العثور على نتيجة. جرّب اسم الشارع أو الحي أو المدينة.", "No results found. Try a street, district, or city name.") 
                     else "No matching place found. Try a street, district, city or region name."
                 )
                 // Nominatim returns the most relevant matches first.
@@ -975,7 +991,7 @@ private fun DashboardScreen(accountName: String) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     searching = false
                     searchMessage = error.message ?: if (deviceLocale.language == "ar") {
-                        "تعذر البحث عن المكان"
+                        localizedUiText("تعذر البحث عن المكان", "Could not search for this place")
                     } else {
                         "Could not search for this place"
                     }
@@ -987,7 +1003,7 @@ private fun DashboardScreen(accountName: String) {
     fun loadNearbyPlaces() {
         val origin = currentLocation
         if (origin == null || loadingNearby) {
-            if (origin == null) locationMessage = "حدد موقعك أولًا لعرض الأماكن القريبة"
+            if (origin == null) locationMessage = localizedUiText("حدد موقعك أولًا لعرض الأماكن القريبة", "Set your location first to see nearby places")
             return
         }
         loadingNearby = true
@@ -1013,7 +1029,7 @@ private fun DashboardScreen(accountName: String) {
                     if (!lat.isFinite() || !lon.isFinite()) continue
                     val category = listOf("amenity", "shop", "tourism", "leisure").firstNotNullOfOrNull { key ->
                         tags.optString(key).takeIf { it.isNotBlank() }
-                    } ?: "مكان"
+                    } ?: localizedUiText("مكان", "Place")
                     places.add(NearbyPlace(name, lat, lon, category))
                 }
                 places.distinctBy { it.name.lowercase() }.take(35)
@@ -1021,13 +1037,13 @@ private fun DashboardScreen(accountName: String) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     nearbyPlaces = places
                     loadingNearby = false
-                    locationMessage = if (places.isEmpty()) "لم نعثر على أماكن مسجلة بالقرب منك" else "تم العثور على ${places.size} مكان قريب"
+                    locationMessage = if (places.isEmpty()) localizedUiText("لم نعثر على أماكن مسجلة بالقرب منك", "No mapped places were found nearby") else localizedUiText("تم العثور على ${places.size} مكان قريب", "Found ${places.size} nearby places")
                     updatePointSource("horus-nearby-source", places)
                 }
             }.onFailure {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingNearby = false
-                    locationMessage = "تعذر تحميل الأماكن القريبة. حاول مرة أخرى بعد قليل."
+                    locationMessage = localizedUiText("تعذر تحميل الأماكن القريبة. حاول مرة أخرى بعد قليل.", "Could not load nearby places. Try again shortly.")
                 }
             }
         }.start()
@@ -1047,12 +1063,12 @@ private fun DashboardScreen(accountName: String) {
     fun drawRoute(destination: NearbyPlace) {
         val origin = currentLocation
         if (origin == null || loadingRoute) {
-            routeMessage = "فعّل إذن الموقع أولًا لبدء المسار"
+            routeMessage = localizedUiText("فعّل إذن الموقع أولًا لبدء المسار", "Enable location permission before starting a route")
             return
         }
         selectedPlace = destination
         loadingRoute = true
-        routeMessage = "جارٍ حساب المسار..."
+        routeMessage = localizedUiText("جارٍ حساب المسار...", "Calculating route...")
         Thread {
             runCatching {
                 val url = java.net.URL(
@@ -1062,8 +1078,8 @@ private fun DashboardScreen(accountName: String) {
                 connection.connectTimeout = 12000
                 connection.readTimeout = 20000
                 val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                val routes = root.optJSONArray("routes") ?: throw IllegalStateException("لم يتم العثور على مسار")
-                if (routes.length() == 0) throw IllegalStateException("لم يتم العثور على مسار")
+                val routes = root.optJSONArray("routes") ?: throw IllegalStateException(localizedUiText("لم يتم العثور على مسار", "No route was found"))
+                if (routes.length() == 0) throw IllegalStateException(localizedUiText("لم يتم العثور على مسار", "No route was found"))
                 val route = routes.getJSONObject(0)
                 val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
                 val points = (0 until coordinates.length()).map { index ->
@@ -1072,7 +1088,7 @@ private fun DashboardScreen(accountName: String) {
                 }
                 val distanceKm = route.optDouble("distance") / 1000.0
                 val durationMin = route.optDouble("duration") / 60.0
-                Pair(org.maplibre.geojson.LineString.fromLngLats(points), "المسافة ${"%.1f".format(java.util.Locale.US, distanceKm)} كم • ${durationMin.toInt()} دقيقة تقريبًا")
+                Pair(org.maplibre.geojson.LineString.fromLngLats(points), localizedUiText("المسافة ${"%.1f".format(java.util.Locale.US, distanceKm)} كم • ${durationMin.toInt()} دقيقة تقريبًا", "Distance ${"%.1f".format(java.util.Locale.US, distanceKm)} km • about ${durationMin.toInt()} min"))
             }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingRoute = false
@@ -1083,12 +1099,12 @@ private fun DashboardScreen(accountName: String) {
                     mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
                         org.maplibre.android.geometry.LatLng(destination.latitude, destination.longitude), 13.5
                     ))
-                    selectedTab = "المسارات"
+                    selectedTab = localizedUiText("المسارات", "Routes")
                 }
             }.onFailure {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingRoute = false
-                    routeMessage = "تعذر حساب المسار الآن. تحقق من الاتصال وحاول مجددًا."
+                    routeMessage = localizedUiText("تعذر حساب المسار الآن. تحقق من الاتصال وحاول مجددًا.", "Could not calculate the route. Check your connection and try again.")
                 }
             }
         }.start()
@@ -1236,8 +1252,8 @@ private fun DashboardScreen(accountName: String) {
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        placeholder = { Text(if (java.util.Locale.getDefault().language == "ar") "ابحث عن دولة أو محافظة أو مدينة أو حي أو شارع" else "Search countries, regions, cities, districts or streets", fontSize = 12.sp) },
-                        leadingIcon = { Icon(Icons.Outlined.Search, "بحث", tint = Blue, modifier = Modifier.size(19.dp)) },
+                        placeholder = { Text(if (java.util.Locale.getDefault().language == "ar") localizedUiText("ابحث عن دولة أو محافظة أو مدينة أو حي أو شارع", "Search countries, regions, cities, districts, or streets") else "Search countries, regions, cities, districts or streets", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, localizedUiText("بحث", "Search"), tint = Blue, modifier = Modifier.size(19.dp)) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { searchPlace() })
                     )
@@ -1323,27 +1339,27 @@ private fun DashboardScreen(accountName: String) {
             }) { Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 21.sp, modifier = Modifier.padding(13.dp)) }
         }
 
-        if (selectedTab == "المحفوظات" || selectedTab == "المسارات" || selectedTab == "حسابي") {
+        if (selectedTab == localizedUiText("المحفوظات", "Saved") || selectedTab == localizedUiText("المسارات", "Routes") || selectedTab == localizedUiText("حسابي", "My account")) {
             Surface(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
                 shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 5.dp
             ) {
                 Column(Modifier.padding(15.dp)) {
-                    Text(when (selectedTab) { "المحفوظات" -> "أماكنك المحفوظة"; "المسارات" -> "المسار الحالي"; else -> "حسابك في Horus Maps" }, color = Navy, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(when (selectedTab) { localizedUiText("المحفوظات", "Saved") -> localizedUiText("أماكنك المحفوظة", "Your saved places"); localizedUiText("المسارات", "Routes") -> localizedUiText("المسار الحالي", "Current route"); else -> localizedUiText("حسابك في Horus Maps", "Your Horus Maps account") }, color = Navy, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Spacer(Modifier.height(7.dp))
                     when (selectedTab) {
-                        "المحفوظات" -> if (favorites.isEmpty()) Text("لم تحفظ أي مكان بعد.", color = Color(0xFF7B8794), fontSize = 11.sp)
+                        localizedUiText("المحفوظات", "Saved") -> if (favorites.isEmpty()) Text(localizedUiText("لم تحفظ أي مكان بعد.", "You have not saved any places yet."), color = Color(0xFF7B8794), fontSize = 11.sp)
                             else LazyColumn(Modifier.heightIn(max = 145.dp)) {
                                 items(favorites) { place ->
                                     Row(Modifier.fillMaxWidth().clickable { drawRoute(place) }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Text("♥", color = Blue); Spacer(Modifier.width(9.dp)); Text(place.name, color = Navy, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1); Text("اذهب", color = Blue, fontSize = 11.sp)
+                                        Text("♥", color = Blue); Spacer(Modifier.width(9.dp)); Text(place.name, color = Navy, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1); Text(localizedUiText("اذهب", "Go"), color = Blue, fontSize = 11.sp)
                                     }
                                 }
                             }
-                        "المسارات" -> Text(if (routeMessage.isBlank()) "ستظهر تفاصيل المسار هنا بعد اختيار وجهة." else routeMessage, color = Color(0xFF667085), fontSize = 11.sp)
-                        else -> Text("مرحبًا ${accountName.ifBlank { "بك" }}. إعدادات الحساب والمعلومات الشخصية ستظهر هنا.", color = Color(0xFF667085), fontSize = 11.sp)
+                        localizedUiText("المسارات", "Routes") -> Text(if (routeMessage.isBlank()) localizedUiText("ستظهر تفاصيل المسار هنا بعد اختيار وجهة.", "Route details will appear here after you choose a destination.") else routeMessage, color = Color(0xFF667085), fontSize = 11.sp)
+                        else -> Text(localizedUiText("مرحبًا ${accountName.ifBlank { "بك" }}. إعدادات الحساب والمعلومات الشخصية ستظهر هنا.", "Welcome ${accountName.ifBlank { "there" }}. Your account settings and personal information will appear here."), color = Color(0xFF667085), fontSize = 11.sp)
                     }
-                    if (loadingRoute) Text("جارٍ حساب الطريق...", color = Blue, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                    if (loadingRoute) Text(localizedUiText("جارٍ حساب الطريق...", "Calculating route..."), color = Blue, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
                 }
             }
         }
@@ -1356,12 +1372,12 @@ private fun DashboardScreen(accountName: String) {
             shape = RoundedCornerShape(topStart = 23.dp, topEnd = 23.dp), color = Color.White, shadowElevation = 12.dp
         ) {
             Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 7.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                listOf("الخريطة", "المسارات", "المحفوظات", "حسابي").forEach { item ->
+                listOf("الخريطة", localizedUiText("المسارات", "Routes"), localizedUiText("المحفوظات", "Saved"), localizedUiText("حسابي", "My account")).forEach { item ->
                     Column(Modifier.weight(1f).fillMaxSize().clickable { selectedTab = item }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Text(when (item) { "الخريطة" -> "⌖"; "المسارات" -> "➤"; "المحفوظات" -> "♡"; else -> "◉" },
+                        Text(when (item) { "الخريطة" -> "⌖"; localizedUiText("المسارات", "Routes") -> "➤"; localizedUiText("المحفوظات", "Saved") -> "♡"; else -> "◉" },
                             color = if (selectedTab == item) Blue else Color(0xFF98A2B3), fontSize = 21.sp)
                         Spacer(Modifier.height(3.dp))
-                        Text(item, color = if (selectedTab == item) Blue else Color(0xFF667085), fontSize = 10.sp,
+                        Text(when (item) { "الخريطة" -> localizedUiText("الخريطة", "Map"); "المسارات" -> localizedUiText("المسارات", "Routes"); "المحفوظات" -> localizedUiText("المحفوظات", "Saved"); else -> localizedUiText("حسابي", "Account") }, color = if (selectedTab == item) Blue else Color(0xFF667085), fontSize = 10.sp,
                             fontWeight = if (selectedTab == item) FontWeight.Bold else FontWeight.Medium)
                     }
                 }
@@ -1393,14 +1409,14 @@ private fun LoginScreen(onBack: () -> Unit, onLoginSuccess: (String) -> Unit, on
         ) {
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("العودة", color = Navy, fontWeight = FontWeight.SemiBold) }
+                TextButton(onClick = onBack) { Text(localizedUiText("العودة", "Back"), color = Navy, fontWeight = FontWeight.SemiBold) }
                 Spacer(Modifier.weight(1f))
                 Image(painterResource(R.drawable.horus_logo), null, Modifier.size(44.dp))
             }
             Spacer(Modifier.height(38.dp))
-            Text("تسجيل الدخول", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Navy)
+            Text(localizedUiText("تسجيل الدخول", "Log in"), fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Navy)
             Spacer(Modifier.height(6.dp))
-            Text("أدخل بريد Horus Maps وكلمة مرورك للمتابعة.", color = Color(0xFF667085), fontSize = 15.sp)
+            Text(localizedUiText("أدخل بريد Horus Maps وكلمة مرورك للمتابعة.", "Enter your Horus Maps email and password to continue."), color = Color(0xFF667085), fontSize = 15.sp)
             Spacer(Modifier.height(30.dp))
             OutlinedTextField(
                 value = handle,
@@ -1409,7 +1425,7 @@ private fun LoginScreen(onBack: () -> Unit, onLoginSuccess: (String) -> Unit, on
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 suffix = { Text("@horus.com", color = Color(0xFF667085)) },
-                label = { Text("بريد Horus Maps") }
+                label = { Text(localizedUiText("بريد Horus Maps", "Horus Maps email")) }
             )
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
@@ -1420,10 +1436,10 @@ private fun LoginScreen(onBack: () -> Unit, onLoginSuccess: (String) -> Unit, on
                 shape = RoundedCornerShape(14.dp),
                 visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                label = { Text("كلمة المرور") },
+                label = { Text(localizedUiText("كلمة المرور", "Password")) },
                 trailingIcon = {
                     IconButton(onClick = { showPassword = !showPassword }) {
-                        Icon(if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (showPassword) "إخفاء كلمة المرور" else "إظهار كلمة المرور", tint = Color(0xFF667085))
+                        Icon(if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (showPassword) localizedUiText("إخفاء كلمة المرور", "Hide password") else localizedUiText("إظهار كلمة المرور", "Show password"), tint = Color(0xFF667085))
                     }
                 }
             )
@@ -1455,21 +1471,21 @@ private fun LoginScreen(onBack: () -> Unit, onLoginSuccess: (String) -> Unit, on
                                     context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).edit()
                                         .putString("account_name", name).putString("account_email", email).apply()
                                     onLoginSuccess(name)
-                                } else error = when (result.optString("error")) { "invalid_credentials" -> "البريد أو كلمة المرور غير صحيحة" else -> "تعذر تسجيل الدخول، حاول مرة أخرى" }
+                                } else error = when (result.optString("error")) { "invalid_credentials" -> localizedUiText("البريد أو كلمة المرور غير صحيحة", "Incorrect email or password") else -> localizedUiText("تعذر تسجيل الدخول، حاول مرة أخرى", "Could not log in. Please try again.") }
                             }
                         }.onFailure {
-                            android.os.Handler(android.os.Looper.getMainLooper()).post { loading = false; error = "تعذر الاتصال بالخادم" }
+                            android.os.Handler(android.os.Looper.getMainLooper()).post { loading = false; error = localizedUiText("تعذر الاتصال بالخادم", "Could not connect to the server") }
                         }
                     }.start()
                 },
                 enabled = !loading && handle.length >= 3 && password.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(14.dp)
-            ) { Text(if (loading) "جارٍ تسجيل الدخول..." else "تسجيل الدخول", fontWeight = FontWeight.Bold) }
+            ) { Text(if (loading) localizedUiText("جارٍ تسجيل الدخول...", "Logging in...") else localizedUiText("تسجيل الدخول", "Log in"), fontWeight = FontWeight.Bold) }
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                Text("ليس لديك حساب؟ ", color = Color(0xFF667085))
-                Text("إنشاء حساب", color = Blue, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onCreateAccount))
+                Text(localizedUiText("ليس لديك حساب؟ ", "Don't have an account? "), color = Color(0xFF667085))
+                Text(localizedUiText("إنشاء حساب", "Create account"), color = Blue, fontWeight = FontWeight.Bold, modifier = Modifier.clickable(onClick = onCreateAccount))
             }
         }
     }
@@ -1480,8 +1496,8 @@ private fun LegalScreen(title: String, onBack: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) {
         Column {
             Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
-            Text("سيتم إضافة المحتوى الكامل للسياسة والشروط في المرحلة التالية.", modifier = Modifier.padding(top = 18.dp), color = Color(0xFF667085))
-            Spacer(Modifier.weight(1f)); OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().height(54.dp)) { Text("العودة") }
+            Text(localizedUiText("سيتم إضافة المحتوى الكامل للسياسة والشروط في المرحلة التالية.", "The full Privacy Policy and Terms content will be added in a later update."), modifier = Modifier.padding(top = 18.dp), color = Color(0xFF667085))
+            Spacer(Modifier.weight(1f)); OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().height(54.dp)) { Text(localizedUiText("العودة", "Back")) }
         }
     }
 }
