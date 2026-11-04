@@ -868,10 +868,20 @@ private fun formatRouteDistance(meters: Double): String =
     if (meters < 1000.0) "${meters.toInt()} م" else String.format(java.util.Locale.US, "%.2f كم", meters / 1000.0)
 
 private fun formatRouteDuration(seconds: Double): String {
+    if (!seconds.isFinite() || seconds <= 0.0) return "—"
     val totalMinutes = kotlin.math.ceil(seconds / 60.0).toInt().coerceAtLeast(1)
     val hours = totalMinutes / 60
     val minutes = totalMinutes % 60
     return if (hours > 0) "${hours} س ${minutes} د" else "${minutes} د"
+}
+
+private fun formatDrivingTrafficEstimate(baseSeconds: Double): String {
+    val lightTraffic = baseSeconds * 1.15
+    val heavyTraffic = baseSeconds * 1.75
+    return localizedUiText(
+        "مرور خفيف: ${formatRouteDuration(lightTraffic)}  |  زحمة: ${formatRouteDuration(heavyTraffic)}",
+        "Light traffic: ${formatRouteDuration(lightTraffic)}  |  Heavy traffic: ${formatRouteDuration(heavyTraffic)}"
+    )
 }
 
 @Composable
@@ -1448,7 +1458,7 @@ private fun DashboardScreen(accountName: String) {
                 catch (_: Exception) { failures.add(localizedUiText("تعذر حساب طريق المشي", "Walking route unavailable")) }
                 val directDistance = straightLineMeters(origin, destination)
                 if (directDistance >= 200_000.0) {
-                    val flightSeconds = (directDistance / 800.0) * 3600.0 + 90.0 * 60.0
+                    val flightSeconds = (directDistance / (800.0 * 1000.0 / 3600.0)) + 90.0 * 60.0
                     options.add(RouteOption(
                         mode = "flight",
                         distanceMeters = directDistance,
@@ -1514,7 +1524,16 @@ private fun DashboardScreen(accountName: String) {
 
     fun stopNavigation() {
         activeNavigation = false
-        navigationStatus = localizedUiText("تم إيقاف الملاحة", "Navigation stopped")
+        currentRoute = null
+        routeOptions = emptyList()
+        routeOriginPoint = null
+        routeDestinationPoint = null
+        (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+            ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf()))
+        nextInstruction = ""
+        remainingDistanceMeters = 0.0
+        remainingDurationSeconds = 0.0
+        navigationStatus = localizedUiText("تم إيقاف الملاحة وإزالة المسار", "Navigation stopped and route cleared")
     }
 
     fun drawRoute(destination: NearbyPlace) {
@@ -1874,6 +1893,19 @@ private fun DashboardScreen(accountName: String) {
                     }
                 }
             }
+            if (activeNavigation) {
+                Surface(shape = RoundedCornerShape(13.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 5.dp) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(nextInstruction.ifBlank { navigationStatus }, color = Navy, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text("${localizedUiText("متبقي", "Remaining")}: ${formatRouteDistance(remainingDistanceMeters)}  •  ${formatRouteDuration(remainingDurationSeconds)}", color = Blue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        TextButton(onClick = { stopNavigation() }) {
+                            Text(localizedUiText("إيقاف", "Stop"), color = Color(0xFFD92D20), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
             if (searchMessage.isNotBlank()) {
                 Surface(shape = RoundedCornerShape(10.dp), color = Color.White.copy(alpha = 0.94f), shadowElevation = 2.dp) {
                     Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -2034,9 +2066,14 @@ private fun DashboardScreen(accountName: String) {
                                         color = if (selectedRouteMode == option.mode) Color(0xFFEAF4FF) else Color(0xFFF7F9FC)) {
                                         Row(Modifier.fillMaxWidth().padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Text(label, color = Navy, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                                            Text(formatRouteDistance(option.distanceMeters), color = Blue, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(formatRouteDuration(option.durationSeconds), color = Color(0xFF667085), fontSize = 11.sp)
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(formatRouteDistance(option.distanceMeters), color = Blue, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                                if (option.mode == "auto") {
+                                                    Text(formatDrivingTrafficEstimate(option.durationSeconds), color = Color(0xFF667085), fontSize = 9.sp, textAlign = TextAlign.End)
+                                                } else {
+                                                    Text(formatRouteDuration(option.durationSeconds), color = Color(0xFF667085), fontSize = 11.sp)
+                                                }
+                                            }
                                         }
                                     }
                                 }
