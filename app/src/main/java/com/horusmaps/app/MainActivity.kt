@@ -914,7 +914,7 @@ private fun DashboardScreen(accountName: String) {
                     val boundarySource = map?.style?.getSource("horus-country-source")
                         as? org.maplibre.android.style.sources.GeoJsonSource
                     val geometry = result.optJSONObject("geojson")
-                    val geometryType = geometry?.optString("type")
+                    val geometryType = geometry?.optString("type").orEmpty()
                     val hasAreaGeometry = geometry != null &&
                         geometryType in setOf("Polygon", "MultiPolygon")
 
