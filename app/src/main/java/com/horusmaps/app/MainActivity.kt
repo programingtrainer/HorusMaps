@@ -89,6 +89,9 @@ private val Blue = Color(0xFF0879D8)
 private val Cyan = Color(0xFF25C8E8)
 private val Ice = Color(0xFFF4F9FF)
 
+private val nominatimRequestLock = Any()
+private var lastNominatimRequestAt = 0L
+
 private val HorusColorScheme = lightColorScheme(
     primary = Blue,
     onPrimary = Color.White,
@@ -898,6 +901,12 @@ private fun DashboardScreen(accountName: String) {
         val languageTag = deviceLocale.toLanguageTag()
         Thread {
             runCatching {
+                // Public Nominatim has a strict one-request-per-second limit.
+                synchronized(nominatimRequestLock) {
+                    val elapsed = System.currentTimeMillis() - lastNominatimRequestAt
+                    if (elapsed < 1_000L) Thread.sleep(1_000L - elapsed)
+                    lastNominatimRequestAt = System.currentTimeMillis()
+                }
                 val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
                 val encodedLanguage = java.net.URLEncoder.encode(languageTag, "UTF-8")
                 val url = java.net.URL(
