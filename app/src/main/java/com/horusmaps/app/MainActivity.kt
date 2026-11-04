@@ -768,6 +768,7 @@ private fun DashboardScreen(accountName: String) {
     var mapLibreMap by remember { mutableStateOf<org.maplibre.android.maps.MapLibreMap?>(null) }
     var searchText by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
+    var boundaryExpiresAt by remember { mutableStateOf(0L) }
     var searchMessage by remember { mutableStateOf("") }
     var darkMap by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("الخريطة") }
@@ -809,6 +810,19 @@ private fun DashboardScreen(accountName: String) {
         targetValue = if (dashboardVisible) 0f else 26f,
         animationSpec = tween(650, easing = FastOutSlowInEasing), label = "dashboard_offset"
     )
+
+    LaunchedEffect(boundaryExpiresAt) {
+        val expectedExpiry = boundaryExpiresAt
+        if (expectedExpiry > 0L) {
+            kotlinx.coroutines.delay(30_000L)
+            if (boundaryExpiresAt == expectedExpiry) {
+                val source = mapLibreMap?.style?.getSource("horus-country-source")
+                    as? org.maplibre.android.style.sources.GeoJsonSource
+                source?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf()))
+                boundaryExpiresAt = 0L
+            }
+        }
+    }
 
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
@@ -910,7 +924,7 @@ private fun DashboardScreen(accountName: String) {
                 val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
                 val encodedLanguage = java.net.URLEncoder.encode(languageTag, "UTF-8")
                 val url = java.net.URL(
-                    "https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=jsonv2&limit=10&addressdetails=1&namedetails=1&polygon_geojson=1&accept-language=$encodedLanguage"
+                    "https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=jsonv2&limit=10&addressdetails=1&namedetails=1&polygon_geojson=1&polygon_threshold=0.0&accept-language=$encodedLanguage"
                 )
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 15000
@@ -946,10 +960,12 @@ private fun DashboardScreen(accountName: String) {
 
                     if (isAdministrativeArea && hasAreaGeometry) {
                         boundarySource?.setGeoJson(geometry.toString())
+                        boundaryExpiresAt = android.os.SystemClock.elapsedRealtime() + 30_000L
                     } else {
                         boundarySource?.setGeoJson(
                             org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
                         )
+                        boundaryExpiresAt = 0L
                     }
 
                     val bbox = result.optJSONArray("boundingbox")
@@ -1147,7 +1163,7 @@ private fun DashboardScreen(accountName: String) {
             ))
             style.addLayer(org.maplibre.android.style.layers.LineLayer("horus-country-boundary-layer", "horus-country-source").withProperties(
                 org.maplibre.android.style.layers.PropertyFactory.lineColor(android.graphics.Color.parseColor("#F04438")),
-                org.maplibre.android.style.layers.PropertyFactory.lineWidth(3.5f),
+                org.maplibre.android.style.layers.PropertyFactory.lineWidth(1.2f),
                 org.maplibre.android.style.layers.PropertyFactory.lineJoin("round"),
                 org.maplibre.android.style.layers.PropertyFactory.lineCap("round")
             ))
