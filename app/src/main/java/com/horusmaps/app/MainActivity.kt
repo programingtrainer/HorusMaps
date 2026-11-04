@@ -1072,6 +1072,7 @@ private fun DashboardScreen(accountName: String) {
     var selectedPoiCategory by remember { mutableStateOf("all") }
     var poiSearchText by remember { mutableStateOf("") }
     var poiSearchMessage by remember { mutableStateOf("") }
+    var hasLoadedInitialNearby by remember { mutableStateOf(false) }
     var routeMessage by remember { mutableStateOf("") }
     var loadingRoute by remember { mutableStateOf(false) }
     var favorites by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
@@ -1965,7 +1966,10 @@ private fun DashboardScreen(accountName: String) {
     }
 
     LaunchedEffect(currentLocation) {
-        if (currentLocation != null) loadNearbyPlaces()
+        if (currentLocation != null && !hasLoadedInitialNearby) {
+            hasLoadedInitialNearby = true
+            loadNearbyPlaces()
+        }
     }
 
     LaunchedEffect(currentLocation, activeNavigation, routeOptions, selectedRouteMode) {
@@ -2055,9 +2059,8 @@ private fun DashboardScreen(accountName: String) {
                                     "horus-nearby-layer"
                                 ).firstOrNull()
                                 if (hit != null) {
-                                    val props = hit.properties()
-                                    val hitName = props?.optString("name").orEmpty()
-                                    val hitCategory = props?.optString("category").orEmpty()
+                                    val hitName = runCatching { hit.getStringProperty("name") }.getOrDefault("")
+                                    val hitCategory = runCatching { hit.getStringProperty("category") }.getOrDefault("")
                                     selectedPlace = nearbyPlaces.firstOrNull {
                                         it.name == hitName && it.category == hitCategory
                                     } ?: run {
@@ -2234,7 +2237,7 @@ private fun DashboardScreen(accountName: String) {
             shape = RoundedCornerShape(14.dp),
             color = Color.White,
             shadowElevation = 5.dp,
-            modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 88.dp)
+            modifier = Modifier.align(Alignment.TopStart).padding(start = 14.dp, top = 250.dp)
                 .clickable {
                     mapLibreMap?.animateCamera(
                         org.maplibre.android.camera.CameraUpdateFactory.newCameraPosition(
@@ -2257,7 +2260,7 @@ private fun DashboardScreen(accountName: String) {
                 shape = RoundedCornerShape(14.dp),
                 color = Color.White,
                 shadowElevation = 5.dp,
-                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 88.dp)
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 250.dp)
                     .clickable {
                         permissionLauncher.launch(arrayOf(
                             android.Manifest.permission.ACCESS_FINE_LOCATION,
