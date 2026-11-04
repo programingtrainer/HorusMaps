@@ -81,6 +81,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.runtime.DisposableEffect
 import kotlinx.coroutines.delay
 
 private val Navy = Color(0xFF062A6B)
@@ -733,6 +734,13 @@ private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
     }
 }
 
+private data class NearbyPlace(
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val category: String
+)
+
 @Composable
 private fun DashboardScreen(accountName: String) {
     val context = LocalContext.current
@@ -743,11 +751,93 @@ private fun DashboardScreen(accountName: String) {
     var searchMessage by remember { mutableStateOf("") }
     var darkMap by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("الخريطة") }
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+                androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var locationMessage by remember { mutableStateOf("نحتاج إذن الموقع لعرض مكانك والأماكن القريبة") }
+    var currentLocation by remember { mutableStateOf<org.maplibre.android.geometry.LatLng?>(null) }
+    var nearbyPlaces by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
+    var loadingNearby by remember { mutableStateOf(false) }
+    var selectedPlace by remember { mutableStateOf<NearbyPlace?>(null) }
+    var routeMessage by remember { mutableStateOf("") }
+    var loadingRoute by remember { mutableStateOf(false) }
+    var favorites by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
+    var dashboardVisible by remember { mutableStateOf(false) }
 
-    val styleUrl = if (darkMap) {
-        "https://tiles.openfreemap.org/styles/dark"
-    } else {
-        "https://tiles.openfreemap.org/styles/liberty"
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        hasLocationPermission =
+            grants[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                grants[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        locationMessage = if (hasLocationPermission) "جارٍ تحديد موقعك..." else "إذن الموقع غير متاح. يمكنك تفعيله من إعدادات التطبيق."
+    }
+
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("horus_map_data", android.content.Context.MODE_PRIVATE)
+        val saved = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
+        favorites = saved.mapNotNull { raw ->
+            runCatching {
+                val json = org.json.JSONObject(raw)
+                NearbyPlace(json.getString("name"), json.getDouble("lat"), json.getDouble("lon"), json.optString("category", "مكان"))
+            }.getOrNull()
+        }
+        kotlinx.coroutines.delay(90)
+        dashboardVisible = true
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(
+                arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
+
+    androidx.compose.runtime.DisposableEffect(hasLocationPermission) {
+        if (!hasLocationPermission) {
+            onDispose { }
+        } else {
+            val manager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+            val listener = object : android.location.LocationListener {
+                override fun onLocationChanged(location: android.location.Location) {
+                    currentLocation = org.maplibre.android.geometry.LatLng(location.latitude, location.longitude)
+                    locationMessage = "تم تحديد موقعك"
+                }
+            }
+            try {
+                val providers = listOf(android.location.LocationManager.NETWORK_PROVIDER, android.location.LocationManager.GPS_PROVIDER)
+                providers.forEach { provider ->
+                    if (manager.isProviderEnabled(provider)) {
+                        manager.getLastKnownLocation(provider)?.let { last ->
+                            if (currentLocation == null || last.time > 0L) {
+                                currentLocation = org.maplibre.android.geometry.LatLng(last.latitude, last.longitude)
+                            }
+                        }
+                        manager.requestLocationUpdates(provider, 5000L, 10f, listener, android.os.Looper.getMainLooper())
+                    }
+                }
+            } catch (_: SecurityException) {
+                locationMessage = "تعذر الوصول إلى الموقع. راجع أذونات التطبيق."
+            } catch (_: Exception) {
+                locationMessage = "خدمة تحديد الموقع غير متاحة حاليًا"
+            }
+            onDispose { runCatching { manager.removeUpdates(listener) } }
+        }
+    }
+
+    val styleUrl = if (darkMap) "https://tiles.openfreemap.org/styles/dark"
+        else "https://tiles.openfreemap.org/styles/liberty"
+
+    fun updatePointSource(sourceId: String, points: List<NearbyPlace>) {
+        val style = mapLibreMap?.style ?: return
+        val features = points.map { place ->
+            org.maplibre.geojson.Feature.fromGeometry(
+                org.maplibre.geojson.Point.fromLngLat(place.longitude, place.latitude)
+            )
+        }
+        val collection = org.maplibre.geojson.FeatureCollection.fromFeatures(features)
+        (style.getSource(sourceId) as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(collection)
     }
 
     fun searchPlace() {
@@ -761,23 +851,21 @@ private fun DashboardScreen(accountName: String) {
                 val encoded = java.net.URLEncoder.encode(query, "UTF-8")
                 val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=1")
                 val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 12_000
-                connection.readTimeout = 12_000
+                connection.connectTimeout = 12000
+                connection.readTimeout = 12000
                 connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (Android)")
                 val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
                 if (results.length() == 0) throw IllegalStateException("لم يتم العثور على المكان")
                 val result = results.getJSONObject(0)
-                val latitude = result.getDouble("lat")
-                val longitude = result.getDouble("lon")
-                val displayName = result.optString("display_name", query)
-                Pair(org.maplibre.android.geometry.LatLng(latitude, longitude), displayName)
+                Pair(
+                    org.maplibre.android.geometry.LatLng(result.getDouble("lat"), result.getDouble("lon")),
+                    result.optString("display_name", query)
+                )
             }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     searching = false
                     searchMessage = result.second
-                    mapLibreMap?.animateCamera(
-                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(result.first, 14.5)
-                    )
+                    mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(result.first, 14.5))
                 }
             }.onFailure { error ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -788,7 +876,126 @@ private fun DashboardScreen(accountName: String) {
         }.start()
     }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFE9F0F6))) {
+    fun loadNearbyPlaces() {
+        val origin = currentLocation
+        if (origin == null || loadingNearby) {
+            if (origin == null) locationMessage = "حدد موقعك أولًا لعرض الأماكن القريبة"
+            return
+        }
+        loadingNearby = true
+        routeMessage = ""
+        Thread {
+            runCatching {
+                val query = "[out:json][timeout:20];(nwr(around:1600,${origin.latitude},${origin.longitude})[name];);out center tags 35;"
+                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+                val connection = java.net.URL("https://overpass-api.de/api/interpreter?data=$encoded").openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 15000
+                connection.readTimeout = 25000
+                val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                val elements = root.optJSONArray("elements") ?: org.json.JSONArray()
+                val places = mutableListOf<NearbyPlace>()
+                for (index in 0 until elements.length()) {
+                    val item = elements.optJSONObject(index) ?: continue
+                    val tags = item.optJSONObject("tags") ?: continue
+                    val name = tags.optString("name").trim()
+                    if (name.isBlank()) continue
+                    val center = item.optJSONObject("center")
+                    val lat = if (item.has("lat")) item.optDouble("lat") else center?.optDouble("lat") ?: Double.NaN
+                    val lon = if (item.has("lon")) item.optDouble("lon") else center?.optDouble("lon") ?: Double.NaN
+                    if (!lat.isFinite() || !lon.isFinite()) continue
+                    val category = listOf("amenity", "shop", "tourism", "leisure").firstNotNullOfOrNull { key ->
+                        tags.optString(key).takeIf { it.isNotBlank() }
+                    } ?: "مكان"
+                    places.add(NearbyPlace(name, lat, lon, category))
+                }
+                places.distinctBy { it.name.lowercase() }.take(35)
+            }.onSuccess { places ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    nearbyPlaces = places
+                    loadingNearby = false
+                    locationMessage = if (places.isEmpty()) "لم نعثر على أماكن مسجلة بالقرب منك" else "تم العثور على ${places.size} مكان قريب"
+                    updatePointSource("horus-nearby-source", places)
+                }
+            }.onFailure {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    loadingNearby = false
+                    locationMessage = "تعذر تحميل الأماكن القريبة. حاول مرة أخرى بعد قليل."
+                }
+            }
+        }.start()
+    }
+
+    fun saveFavorite(place: NearbyPlace) {
+        val exists = favorites.any { it.name == place.name && it.latitude == place.latitude && it.longitude == place.longitude }
+        favorites = if (exists) favorites.filterNot { it.name == place.name && it.latitude == place.latitude && it.longitude == place.longitude } else favorites + place
+        val serialized = favorites.map { placeItem ->
+            org.json.JSONObject().put("name", placeItem.name).put("lat", placeItem.latitude)
+                .put("lon", placeItem.longitude).put("category", placeItem.category).toString()
+        }.toSet()
+        context.getSharedPreferences("horus_map_data", android.content.Context.MODE_PRIVATE)
+            .edit().putStringSet("favorites", serialized).apply()
+    }
+
+    fun drawRoute(destination: NearbyPlace) {
+        val origin = currentLocation
+        if (origin == null || loadingRoute) {
+            routeMessage = "فعّل إذن الموقع أولًا لبدء المسار"
+            return
+        }
+        selectedPlace = destination
+        loadingRoute = true
+        routeMessage = "جارٍ حساب المسار..."
+        Thread {
+            runCatching {
+                val url = java.net.URL(
+                    "https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson"
+                )
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 12000
+                connection.readTimeout = 20000
+                val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                val routes = root.optJSONArray("routes") ?: throw IllegalStateException("لم يتم العثور على مسار")
+                if (routes.length() == 0) throw IllegalStateException("لم يتم العثور على مسار")
+                val route = routes.getJSONObject(0)
+                val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
+                val points = (0 until coordinates.length()).map { index ->
+                    val pair = coordinates.getJSONArray(index)
+                    org.maplibre.geojson.Point.fromLngLat(pair.getDouble(0), pair.getDouble(1))
+                }
+                val distanceKm = route.optDouble("distance") / 1000.0
+                val durationMin = route.optDouble("duration") / 60.0
+                Pair(org.maplibre.geojson.LineString.fromLngLats(points), "المسافة ${"%.1f".format(java.util.Locale.US, distanceKm)} كم • ${durationMin.toInt()} دقيقة تقريبًا")
+            }.onSuccess { result ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    loadingRoute = false
+                    routeMessage = result.second
+                    val style = mapLibreMap?.style
+                    (style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(result.first)
+                    mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                        org.maplibre.android.geometry.LatLng(destination.latitude, destination.longitude), 13.5
+                    ))
+                    selectedTab = "المسارات"
+                }
+            }.onFailure {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    loadingRoute = false
+                    routeMessage = "تعذر حساب المسار الآن. تحقق من الاتصال وحاول مجددًا."
+                }
+            }
+        }.start()
+    }
+
+    LaunchedEffect(currentLocation, mapLibreMap) {
+        val location = currentLocation
+        if (location != null && mapLibreMap != null) {
+            val point = org.maplibre.geojson.Point.fromLngLat(location.longitude, location.latitude)
+            val feature = org.maplibre.geojson.Feature.fromGeometry(point)
+            val collection = org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature))
+            (mapLibreMap?.style?.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(collection)
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFFF3F6F9))) {
         androidx.compose.ui.viewinterop.AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { viewContext ->
@@ -799,11 +1006,50 @@ private fun DashboardScreen(accountName: String) {
                     onResume()
                     getMapAsync { map ->
                         mapLibreMap = map
-                        map.setStyle(styleUrl) {
+                        map.setStyle(styleUrl) { style ->
                             map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
-                                .target(org.maplibre.android.geometry.LatLng(30.0444, 31.2357))
-                                .zoom(12.0)
-                                .build()
+                                .target(org.maplibre.android.geometry.LatLng(30.0444, 31.2357)).zoom(11.5).build()
+                            val userSource = org.maplibre.android.style.sources.GeoJsonSource(
+                                "horus-user-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+                            )
+                            style.addSource(userSource)
+                            style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-user-layer", "horus-user-source").withProperties(
+                                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#1677E8")),
+                                org.maplibre.android.style.layers.PropertyFactory.circleRadius(8f),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(3f)
+                            ))
+                            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
+                                "horus-nearby-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+                            ))
+                            style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-nearby-layer", "horus-nearby-source").withProperties(
+                                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#F59E0B")),
+                                org.maplibre.android.style.layers.PropertyFactory.circleRadius(6f),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f)
+                            ))
+                            style.addSource(org.maplibre.android.style.sources.GeoJsonSource(
+                                "horus-route-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
+                            ))
+                            style.addLayer(org.maplibre.android.style.layers.LineLayer("horus-route-layer", "horus-route-source").withProperties(
+                                org.maplibre.android.style.layers.PropertyFactory.lineColor(android.graphics.Color.parseColor("#0879D8")),
+                                org.maplibre.android.style.layers.PropertyFactory.lineWidth(5f),
+                                org.maplibre.android.style.layers.PropertyFactory.lineCap("round"),
+                                org.maplibre.android.style.layers.PropertyFactory.lineJoin("round")
+                            ))
+                            currentLocation?.let { location ->
+                                val feature = org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(location.longitude, location.latitude))
+                                (style.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                                    ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature)))
+                            }
+                            val savedPlaces = nearbyPlaces.map { it }
+                            if (savedPlaces.isNotEmpty()) {
+                                val features = savedPlaces.map { place ->
+                                    org.maplibre.geojson.Feature.fromGeometry(org.maplibre.geojson.Point.fromLngLat(place.longitude, place.latitude))
+                                }
+                                (style.getSource("horus-nearby-source") as? org.maplibre.android.style.sources.GeoJsonSource)
+                                    ?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
+                            }
                         }
                     }
                 }
@@ -811,161 +1057,164 @@ private fun DashboardScreen(accountName: String) {
             update = { }
         )
 
-        // Floating map controls stay separate from the vector map, so each can be
-        // styled and extended without changing the underlying map data.
         Column(
-            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().graphicsLayer {
+                alpha = if (dashboardVisible) 1f else 0f
+                translationY = if (dashboardVisible) 0f else -28f
+            }.padding(start = 15.dp, end = 15.dp, top = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
         ) {
-            Surface(shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 8.dp) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "+", fontSize = 27.sp, color = Navy,
-                        modifier = Modifier.clickable {
-                            mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomIn())
-                        }.padding(horizontal = 17.dp, vertical = 5.dp)
-                    )
-                    Box(Modifier.width(30.dp).height(1.dp).background(Color(0xFFE8EDF3)))
-                    Text(
-                        "−", fontSize = 27.sp, color = Navy,
-                        modifier = Modifier.clickable {
-                            mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomOut())
-                        }.padding(horizontal = 17.dp, vertical = 5.dp)
-                    )
-                }
-            }
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color.White,
-                shadowElevation = 8.dp,
-                modifier = Modifier.clickable {
-                    mapLibreMap?.animateCamera(
-                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                            org.maplibre.android.geometry.LatLng(30.0444, 31.2357), 12.0
-                        )
-                    )
-                }
-            ) {
-                Text("◎", color = Blue, fontSize = 25.sp, modifier = Modifier.padding(12.dp))
-            }
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color.White,
-                shadowElevation = 8.dp,
-                modifier = Modifier.clickable {
-                    darkMap = !darkMap
-                    mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty")
-                }
-            ) {
-                Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 22.sp, modifier = Modifier.padding(13.dp))
-            }
-        }
-
-        Column(Modifier.fillMaxSize()) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 42.dp),
-                shape = RoundedCornerShape(22.dp),
-                color = Color.White,
-                shadowElevation = 10.dp
-            ) {
-                Column(Modifier.padding(12.dp)) {
+            Surface(shape = RoundedCornerShape(21.dp), color = Color.White, shadowElevation = 7.dp) {
+                Column(Modifier.padding(13.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painterResource(R.drawable.horus_logo),
-                            contentDescription = "Horus Maps",
-                            modifier = Modifier.size(46.dp).background(Color(0xFFF3F8FC), RoundedCornerShape(14.dp)).padding(4.dp)
-                        )
+                        Image(painterResource(R.drawable.horus_logo), "Horus Maps", Modifier.size(43.dp).background(Color(0xFFF1F6FB), RoundedCornerShape(13.dp)).padding(4.dp))
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("مرحباً، $accountName", color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            Text("إلى أين نذهب اليوم؟", color = Color(0xFF7B8794), fontSize = 12.sp)
+                            Text("مرحبًا، ${accountName.ifBlank { "صديقنا" }}", color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("اكتشف ما حولك بسهولة", color = Color(0xFF7B8794), fontSize = 11.sp)
                         }
-                        Surface(shape = CircleShape, color = Color(0xFFEAF7FC)) {
+                        Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFFEAF4FF)) {
                             Text("H", color = Blue, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp))
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(11.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
-                            value = searchText,
-                            onValueChange = { searchText = it },
-                            modifier = Modifier.weight(1f).heightIn(min = 54.dp),
-                            singleLine = true,
-                            shape = RoundedCornerShape(15.dp),
-                            placeholder = { Text("ابحث عن مدينة أو مكان...", fontSize = 13.sp) },
-                            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = "بحث", tint = Blue) },
+                            value = searchText, onValueChange = { searchText = it },
+                            modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                            singleLine = true, shape = RoundedCornerShape(14.dp),
+                            placeholder = { Text("ابحث عن مكان أو مدينة", fontSize = 13.sp) },
+                            leadingIcon = { Icon(Icons.Outlined.Search, "بحث", tint = Blue) },
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = { searchPlace() })
                         )
                         Spacer(Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(15.dp),
-                            color = Blue,
-                            modifier = Modifier.size(54.dp).clickable { searchPlace() }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-                            }
+                        Surface(shape = RoundedCornerShape(14.dp), color = Blue, modifier = Modifier.size(52.dp).clickable { searchPlace() }) {
+                            Box(contentAlignment = Alignment.Center) { Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold) }
                         }
                     }
                     if (searchMessage.isNotBlank()) {
-                        Text(
-                            searchMessage,
-                            color = if (searchMessage.startsWith("لم يتم") || searchMessage.startsWith("تعذر")) Color(0xFFD92D20) else Color(0xFF667085),
-                            fontSize = 11.sp,
-                            maxLines = 2,
-                            modifier = Modifier.padding(top = 7.dp)
-                        )
+                        Text(searchMessage, color = Color(0xFF667085), fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(top = 6.dp))
                     }
                 }
             }
-
-            Spacer(Modifier.weight(1f))
-
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.96f), shadowElevation = 4.dp) {
-                    Text("خريطة تفاعلية • OpenFreeMap", color = Color(0xFF667085), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
-                }
-                Spacer(Modifier.weight(1f))
-                Surface(shape = RoundedCornerShape(12.dp), color = Color.White.copy(alpha = 0.96f), shadowElevation = 4.dp) {
-                    Text("بيانات الخرائط", color = Blue, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+            if (!hasLocationPermission || currentLocation == null) {
+                Surface(shape = RoundedCornerShape(15.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 3.dp) {
+                    Row(Modifier.fillMaxWidth().clickable {
+                        if (!hasLocationPermission) permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("◎", color = Blue, fontSize = 20.sp)
+                        Spacer(Modifier.width(9.dp))
+                        Text(locationMessage, color = Color(0xFF667085), fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        if (!hasLocationPermission) Text("تفعيل", color = Blue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
             }
+        }
 
+        Column(
+            Modifier.align(Alignment.CenterEnd).padding(end = 13.dp).graphicsLayer {
+                alpha = if (dashboardVisible) 1f else 0f
+                translationX = if (dashboardVisible) 0f else 22f
+            },
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Surface(shape = RoundedCornerShape(14.dp), color = Color.White, shadowElevation = 5.dp) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("+", fontSize = 25.sp, color = Navy, modifier = Modifier.clickable { mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomIn()) }.padding(horizontal = 16.dp, vertical = 4.dp))
+                    Box(Modifier.width(28.dp).height(1.dp).background(Color(0xFFE8EDF3)))
+                    Text("−", fontSize = 25.sp, color = Navy, modifier = Modifier.clickable { mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomOut()) }.padding(horizontal = 16.dp, vertical = 4.dp))
+                }
+            }
+            Surface(shape = RoundedCornerShape(14.dp), color = Color.White, shadowElevation = 5.dp, modifier = Modifier.clickable {
+                currentLocation?.let { mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(it, 15.5)) }
+                    ?: run { if (!hasLocationPermission) permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)) }
+            }) { Text("◎", color = Blue, fontSize = 23.sp, modifier = Modifier.padding(12.dp)) }
+            Surface(shape = RoundedCornerShape(14.dp), color = Color.White, shadowElevation = 5.dp, modifier = Modifier.clickable {
+                darkMap = !darkMap
+                mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty") { }
+            }) { Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 21.sp, modifier = Modifier.padding(13.dp)) }
+        }
+
+        if (selectedTab == "الخريطة") {
             Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(topStart = 25.dp, topEnd = 25.dp),
-                color = Color.White,
-                shadowElevation = 14.dp
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
+                shape = RoundedCornerShape(18.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 5.dp
             ) {
-                Row(
-                    Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    listOf("الخريطة", "المسارات", "المحفوظات", "حسابي").forEach { item ->
-                        Column(
-                            modifier = Modifier.weight(1f).fillMaxSize().clickable { selectedTab = item },
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                when (item) { "الخريطة" -> "⌖"; "المسارات" -> "➤"; "المحفوظات" -> "♡"; else -> "◉" },
-                                color = if (selectedTab == item) Blue else Color(0xFF98A2B3),
-                                fontSize = 22.sp
-                            )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                item,
-                                color = if (selectedTab == item) Blue else Color(0xFF667085),
-                                fontSize = 11.sp,
-                                fontWeight = if (selectedTab == item) FontWeight.Bold else FontWeight.Medium
-                            )
+                Column(Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("أماكن قريبة منك", color = Navy, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(if (nearbyPlaces.isEmpty()) "اكتشف المقاهي والمتاجر والمعالم حولك" else "${nearbyPlaces.size} مكان في محيطك", color = Color(0xFF7B8794), fontSize = 10.sp)
                         }
+                        Button(
+                            onClick = { loadNearbyPlaces() },
+                            enabled = !loadingNearby && currentLocation != null,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 13.dp, vertical = 7.dp),
+                            shape = RoundedCornerShape(11.dp)
+                        ) { Text(if (loadingNearby) "جارٍ البحث..." else "استكشف القريب", fontSize = 11.sp) }
+                    }
+                    if (nearbyPlaces.isNotEmpty()) {
+                        Spacer(Modifier.height(7.dp))
+                        LazyColumn(Modifier.heightIn(max = 118.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(nearbyPlaces.take(5)) { place ->
+                                Row(Modifier.fillMaxWidth().clickable { drawRoute(place) }.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("●", color = Color(0xFFF59E0B), fontSize = 12.sp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(place.name, color = Navy, fontSize = 11.sp, maxLines = 1, fontWeight = FontWeight.SemiBold)
+                                        Text(place.category, color = Color(0xFF98A2B3), fontSize = 9.sp)
+                                    }
+                                    Text("اتجاهات", color = Blue, fontSize = 10.sp)
+                                    Text(if (favorites.any { it.name == place.name && it.latitude == place.latitude }) "♥" else "♡", color = Blue, fontSize = 18.sp, modifier = Modifier.clickable { saveFavorite(place) }.padding(start = 9.dp))
+                                }
+                            }
+                        }
+                    }
+                    if (locationMessage.isNotBlank()) Text(locationMessage, color = Color(0xFF7B8794), fontSize = 9.sp, maxLines = 1)
+                }
+            }
+        } else if (selectedTab == "المحفوظات" || selectedTab == "المسارات" || selectedTab == "حسابي") {
+            Surface(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 88.dp, start = 15.dp, end = 15.dp),
+                shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 5.dp
+            ) {
+                Column(Modifier.padding(15.dp)) {
+                    Text(when (selectedTab) { "المحفوظات" -> "أماكنك المحفوظة"; "المسارات" -> "المسار الحالي"; else -> "حسابك في Horus Maps" }, color = Navy, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Spacer(Modifier.height(7.dp))
+                    when (selectedTab) {
+                        "المحفوظات" -> if (favorites.isEmpty()) Text("لم تحفظ أي مكان بعد. احفظ الأماكن من قائمة القريب منك.", color = Color(0xFF7B8794), fontSize = 11.sp)
+                            else LazyColumn(Modifier.heightIn(max = 145.dp)) {
+                                items(favorites) { place ->
+                                    Row(Modifier.fillMaxWidth().clickable { drawRoute(place) }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("♥", color = Blue); Spacer(Modifier.width(9.dp)); Text(place.name, color = Navy, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1); Text("اذهب", color = Blue, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        "المسارات" -> Text(if (routeMessage.isBlank()) "اختر مكانًا قريبًا واضغط «اتجاهات» لحساب مسار القيادة." else routeMessage, color = Color(0xFF667085), fontSize = 11.sp)
+                        else -> Text("مرحبًا ${accountName.ifBlank { "بك" }}. إعدادات الحساب والمعلومات الشخصية ستظهر هنا.", color = Color(0xFF667085), fontSize = 11.sp)
+                    }
+                    if (loadingRoute) Text("جارٍ حساب الطريق...", color = Blue, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                }
+            }
+        }
+
+        Surface(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().graphicsLayer {
+                alpha = if (dashboardVisible) 1f else 0f
+                translationY = if (dashboardVisible) 0f else 24f
+            },
+            shape = RoundedCornerShape(topStart = 23.dp, topEnd = 23.dp), color = Color.White, shadowElevation = 12.dp
+        ) {
+            Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 7.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                listOf("الخريطة", "المسارات", "المحفوظات", "حسابي").forEach { item ->
+                    Column(Modifier.weight(1f).fillMaxSize().clickable { selectedTab = item }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Text(when (item) { "الخريطة" -> "⌖"; "المسارات" -> "➤"; "المحفوظات" -> "♡"; else -> "◉" },
+                            color = if (selectedTab == item) Blue else Color(0xFF98A2B3), fontSize = 21.sp)
+                        Spacer(Modifier.height(3.dp))
+                        Text(item, color = if (selectedTab == item) Blue else Color(0xFF667085), fontSize = 10.sp,
+                            fontWeight = if (selectedTab == item) FontWeight.Bold else FontWeight.Medium)
                     }
                 }
             }
