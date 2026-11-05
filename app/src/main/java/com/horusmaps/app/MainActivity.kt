@@ -2466,12 +2466,26 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
                         mapLibreMap = map
                         mapStyleLoaded = false
                         map.setStyle(styleUrl) { style ->
+                            // Keep the base vector map usable even if an optional custom layer
+                            // cannot be installed (for example, when a style source changes).
+                            val initialTarget = currentLocation
+                            if (initialTarget != null) {
+                                map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                                    .target(initialTarget).zoom(12.5).build()
+                            } else {
+                                map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                                    .zoom(2.0).build()
+                            }
+                            runCatching { installMapLayers(style) }
+                                .onFailure { error ->
+                                    android.util.Log.e("HorusMaps", "Optional map layers could not be installed", error)
+                                }
+                            runCatching { loadContinentBoundaries(style) }
+                                .onFailure { error ->
+                                    android.util.Log.w("HorusMaps", "Continent boundaries are unavailable", error)
+                                }
+                            // Mark ready only after the base style and guarded setup have completed.
                             mapStyleLoaded = true
-                            val initialTarget = currentLocation ?: org.maplibre.android.geometry.LatLng(0.0, 0.0)
-                            map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
-                                .target(initialTarget).zoom(if (currentLocation != null) 12.5 else 2.0).build()
-                            installMapLayers(style)
-                            loadContinentBoundaries(style)
                             map.addOnMapClickListener { tappedPoint ->
                                 val screenPoint = map.projection.toScreenLocation(tappedPoint)
                                 val nativePoiLayers = map.style?.getLayers()
