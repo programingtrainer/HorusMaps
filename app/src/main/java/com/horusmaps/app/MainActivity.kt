@@ -2086,11 +2086,13 @@ private fun DashboardScreen(accountName: String) {
                                 val screenPoint = map.projection.toScreenLocation(tappedPoint)
                                 val hit = map.queryRenderedFeatures(
                                     screenPoint,
-                                    arrayOf("horus-nearby-icon-layer", "horus-nearby-layer")
+                                    "horus-nearby-icon-layer",
+                                    "horus-nearby-layer"
                                 ).firstOrNull()
                                 if (hit != null) {
-                                    val hitName = runCatching { hit.getStringProperty("name") }.getOrNull().orEmpty()
-                                    val hitCategory = runCatching { hit.getStringProperty("category") }.getOrNull().orEmpty()
+                                    val properties = hit.properties()
+                                    val hitName = properties?.get("name")?.asString.orEmpty()
+                                    val hitCategory = properties?.get("category")?.asString.orEmpty()
                                     selectedPlace = nearbyPlaces.firstOrNull {
                                         it.name == hitName && it.category == hitCategory
                                     } ?: run {
