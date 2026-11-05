@@ -769,6 +769,8 @@ private fun nearbyPlaceIcon(category: String): String = when (category.lowercase
     "supermarket", "convenience", "mall" -> "▦"
     "hotel", "hostel" -> "⌂"
     "atm", "bank" -> "▣"
+    "place_of_worship" -> "🕌"
+    "station", "railway" -> "🚉"
     else -> "•"
 }
 
@@ -1075,7 +1077,6 @@ private fun DashboardScreen(accountName: String) {
     var loadingNearby by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<NearbyPlace?>(null) }
     var selectedPoiCategory by remember { mutableStateOf("all") }
-    var poiSearchText by remember { mutableStateOf("") }
     var poiSearchMessage by remember { mutableStateOf("") }
     var hasLoadedInitialNearby by remember { mutableStateOf(false) }
     var routeMessage by remember { mutableStateOf("") }
@@ -1508,7 +1509,7 @@ private fun DashboardScreen(accountName: String) {
         }.start()
     }
 
-    fun loadNearbyPlaces(category: String = selectedPoiCategory, searchTerm: String = poiSearchText) {
+    fun loadNearbyPlaces(category: String = selectedPoiCategory, searchTerm: String = "") {
         val origin = mapLibreMap?.cameraPosition?.target ?: currentLocation
         if (origin == null || loadingNearby) {
             if (origin == null) poiSearchMessage = localizedUiText("حدد موقعك أو حرّك الخريطة إلى المنطقة المطلوبة أولًا", "Set your location or move the map to the area you want to search")
@@ -1529,15 +1530,20 @@ private fun DashboardScreen(accountName: String) {
                     "shopping" -> listOf("""[shop~"^(supermarket|convenience|mall|department_store)$"]""")
                     "stay" -> listOf("""[tourism~"^(hotel|hostel|motel|guest_house)$"]""")
                     "atm" -> listOf("""[amenity~"^(atm|bank)$"]""")
+                    "mosques" -> listOf("""[amenity="place_of_worship"][religion="muslim"]""")
+                    "stations" -> listOf("""[railway~"^(station|halt|tram_stop)$"]""")
                     else -> listOf(
-                        """[amenity~"^(restaurant|cafe|fast_food|hospital|clinic|pharmacy|fuel|atm|bank)$"]""",
+                        """[amenity~"^(restaurant|cafe|fast_food|hospital|clinic|pharmacy|fuel|atm|bank|place_of_worship)$"]""",
                         """[shop~"^(supermarket|convenience|mall|department_store)$"]""",
                         """[leisure~"^(park|garden|playground|nature_reserve)$"]""",
-                        """[tourism~"^(hotel|hostel|motel|guest_house)$"]"""
+                        """[tourism~"^(hotel|hostel|motel|guest_house)$"]""",
+                        """[railway~"^(station|halt|tram_stop)$"]"""
                     )
                 }
                 val nameFilter = searchTerm.trim().takeIf { it.isNotBlank() }?.let { raw ->
-                    val safe = raw.filter { it.isLetterOrDigit() || it.isWhitespace() || it == '-' }
+                    val safe = raw.trim().split(Regex("\\s+"))
+                        .filter { it.isNotBlank() }
+                        .joinToString(".*") { word -> word.filter { it.isLetterOrDigit() || it == '-' } }
                     """[~"^(name(:.*)?|brand(:.*)?|operator(:.*)?)$"~"$safe",i]"""
                 } ?: "[name]"
                 val selectors = categoryFilters.joinToString("") { filter ->
@@ -1602,6 +1608,48 @@ private fun DashboardScreen(accountName: String) {
                 }
             }
         }.start()
+    }
+
+    fun searchFromMainBar() {
+        val raw = searchText.trim()
+        if (raw.isBlank() || loadingNearby || searching) return
+        val normalized = raw.lowercase(java.util.Locale.ROOT)
+        val category = when {
+            listOf("سوبر ماركت", "سوبرماركت", "بقالة", "supermarket", "grocery", "panda", "بنده", "بندة", "كارفور", "carrefour", "لولو", "lulu").any { normalized.contains(it) } -> "shopping"
+            listOf("مطعم", "مطاعم", "كافيه", "مقهى", "restaurant", "cafe", "coffee").any { normalized.contains(it) } -> "food"
+            listOf("بنزين", "محطة وقود", "fuel", "gas station", "petrol").any { normalized.contains(it) } -> "fuel"
+            listOf("مستشفى", "مستشفي", "صيدلية", "عيادة", "hospital", "pharmacy", "clinic").any { normalized.contains(it) } -> "health"
+            listOf("حديقة", "منتزه", "park", "garden").any { normalized.contains(it) } -> "parks"
+            listOf("مسجد", "جامع", "mosque", "masjid").any { normalized.contains(it) } -> "mosques"
+            listOf("محطة قطار", "محطه قطار", "قطار", "train station", "railway station").any { normalized.contains(it) } -> "stations"
+            listOf("فندق", "hotel", "hostel").any { normalized.contains(it) } -> "stay"
+            listOf("صراف", "atm", "بنك", "bank").any { normalized.contains(it) } -> "atm"
+            else -> null
+        }
+        if (category == null) {
+            searchPlace()
+            return
+        }
+        val categoryWords = listOf(
+            "سوبر ماركت", "سوبرماركت", "بقالة", "supermarket", "grocery",
+            "مطعم", "مطاعم", "كافيه", "مقهى", "restaurant", "cafe", "coffee",
+            "بنزين", "محطة وقود", "fuel", "gas station", "petrol",
+            "مستشفى", "مستشفي", "صيدلية", "عيادة", "hospital", "pharmacy", "clinic",
+            "حديقة", "منتزه", "park", "garden", "مسجد", "جامع", "mosque", "masjid",
+            "محطة قطار", "محطه قطار", "قطار", "train station", "railway station",
+            "فندق", "hotel", "hostel", "صراف", "atm", "بنك", "bank"
+        )
+        val placeName = categoryWords.fold(raw) { value, word ->
+            value.replace(Regex(Regex.escape(word), RegexOption.IGNORE_CASE), " ")
+        }.replace(Regex("\\s+"), " ").trim()
+        selectedPoiCategory = category
+        selectedPlace = null
+        routeOptions = emptyList()
+        currentRoute = null
+        routeMessage = ""
+        searchMessage = ""
+        focusManager.clearFocus()
+        loadNearbyPlaces(category, placeName)
     }
 
     fun saveFavorite(place: NearbyPlace) {
@@ -1715,7 +1763,7 @@ private fun DashboardScreen(accountName: String) {
                     runCatching { mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(bounds, 100)) }
                     routeMessage = localizedUiText("تم حساب خيارات الرحلة. بعض الوسائل قد لا تتوفر إذا لم يوجد مسار بري متصل أو بيانات نقل.", "Journey options calculated. Some modes may be unavailable when no connected land route or transit data exists.")
                     loadingRoute = false
-                    selectedTab = localizedUiText("المسارات", "Routes")
+                    selectedTab = if (selectedPlace != null) "الخريطة" else localizedUiText("المسارات", "Routes")
                 }
             }.onFailure { error ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -2107,6 +2155,8 @@ private fun DashboardScreen(accountName: String) {
                                         }
                                     }
                                     if (selectedPlace != null) {
+                                        routeOptions = emptyList()
+                                        routeMessage = ""
                                         map.animateCamera(
                                             org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(tappedPoint, map.cameraPosition.zoom.coerceAtLeast(15.0)),
                                             350
@@ -2149,15 +2199,15 @@ private fun DashboardScreen(accountName: String) {
                         modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        placeholder = { Text(localizedUiText("ابحث عن دولة أو محافظة أو مدينة أو حي أو شارع", "Search countries, regions, cities, districts, or streets"), fontSize = 12.sp) },
+                        placeholder = { Text(localizedUiText("ابحث عن مكان أو خدمة قريبة أو عنوان", "Search nearby places, services, or an address"), fontSize = 12.sp) },
                         leadingIcon = { Icon(Icons.Outlined.Search, localizedUiText("بحث", "Search"), tint = Blue, modifier = Modifier.size(19.dp)) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { searchPlace() })
+                        keyboardActions = KeyboardActions(onSearch = { searchFromMainBar() })
                     )
                     Spacer(Modifier.width(7.dp))
                     IconButton(
-                        onClick = { searchPlace() },
-                        enabled = !searching,
+                        onClick = { searchFromMainBar() },
+                        enabled = !searching && !loadingNearby,
                         modifier = Modifier.size(48.dp).background(Blue, RoundedCornerShape(12.dp))
                     ) {
                         Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
@@ -2178,7 +2228,9 @@ private fun DashboardScreen(accountName: String) {
                             Triple("parks", localizedUiText("منتزهات", "Parks"), "♣"),
                             Triple("shopping", localizedUiText("تسوق", "Shopping"), "▦"),
                             Triple("stay", localizedUiText("فنادق", "Hotels"), "⌂"),
-                            Triple("atm", localizedUiText("بنوك وATM", "Banks & ATMs"), "▣")
+                            Triple("atm", localizedUiText("بنوك وATM", "Banks & ATMs"), "▣"),
+                            Triple("mosques", localizedUiText("جوامع", "Mosques"), "🕌"),
+                            Triple("stations", localizedUiText("محطات قطار", "Train stations"), "🚉")
                         )
                         categories.forEach { (key, label, icon) ->
                             val selected = selectedPoiCategory == key
@@ -2188,7 +2240,7 @@ private fun DashboardScreen(accountName: String) {
                                 modifier = Modifier.animateContentSize(tween(180)).clickable(enabled = !loadingNearby) {
                                     selectedPoiCategory = key
                                     selectedPlace = null
-                                    loadNearbyPlaces(key, poiSearchText)
+                                    loadNearbyPlaces(key, "")
                                 }
                             ) {
                                 Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2199,27 +2251,6 @@ private fun DashboardScreen(accountName: String) {
                             }
                         }
                     }
-                    Spacer(Modifier.height(5.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = poiSearchText,
-                            onValueChange = { poiSearchText = it },
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                            singleLine = true,
-                            shape = RoundedCornerShape(11.dp),
-                            placeholder = { Text(localizedUiText("ابحث عن مكان قريب مثل بنده", "Search nearby, e.g. Panda"), fontSize = 11.sp) },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { loadNearbyPlaces(selectedPoiCategory, poiSearchText) })
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        IconButton(
-                            onClick = { loadNearbyPlaces(selectedPoiCategory, poiSearchText) },
-                            enabled = !loadingNearby,
-                            modifier = Modifier.size(44.dp).background(Blue, RoundedCornerShape(11.dp))
-                        ) {
-                            Text(if (loadingNearby) "…" else "⌕", color = Color.White, fontSize = 21.sp)
-                        }
-                    }
                     if (poiSearchMessage.isNotBlank()) {
                         Text(poiSearchMessage, color = Color(0xFF667085), fontSize = 9.sp, modifier = Modifier.padding(top = 3.dp), maxLines = 2)
                     }
@@ -2227,7 +2258,16 @@ private fun DashboardScreen(accountName: String) {
                         val reference = mapLibreMap?.cameraPosition?.target ?: currentLocation
                         nearbyPlaces.take(3).forEach { place ->
                             Row(
-                                Modifier.fillMaxWidth().clickable { selectedPlace = place }.padding(vertical = 3.dp),
+                                Modifier.fillMaxWidth().clickable {
+                                    selectedPlace = place
+                                    routeOptions = emptyList()
+                                    routeMessage = ""
+                                    mapLibreMap?.animateCamera(
+                                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                                            org.maplibre.android.geometry.LatLng(place.latitude, place.longitude), 15.5
+                                        ), 420
+                                    )
+                                }.padding(vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 13.sp)
@@ -2481,11 +2521,18 @@ private fun DashboardScreen(accountName: String) {
         AnimatedVisibility(
             visible = selectedPlace != null,
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 88.dp),
-            enter = fadeIn(tween(220)) + expandVertically(tween(260)),
-            exit = androidx.compose.animation.fadeOut(tween(160)) + androidx.compose.animation.shrinkVertically(tween(180))
+            enter = fadeIn(tween(260)) +
+                expandVertically(tween(320, easing = FastOutSlowInEasing)) +
+                androidx.compose.animation.slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it / 3 },
+            exit = androidx.compose.animation.fadeOut(tween(180)) +
+                androidx.compose.animation.shrinkVertically(tween(220)) +
+                androidx.compose.animation.slideOutVertically(tween(220)) { it / 4 }
         ) {
             selectedPlace?.let { place ->
-                Surface(shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 12.dp) {
+                Surface(
+                    modifier = Modifier.animateContentSize(tween(320, easing = FastOutSlowInEasing)),
+                    shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 14.dp
+                ) {
                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 22.sp)
@@ -2499,19 +2546,81 @@ private fun DashboardScreen(accountName: String) {
                             }
                         }
                         Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                routeOriginText = localizedUiText("موقعي الحالي", "My current location")
-                                routeDestinationText = place.name
-                                selectedTab = localizedUiText("المسارات", "Routes")
-                                calculateJourney()
-                                selectedPlace = null
-                            },
-                            enabled = !loadingRoute,
-                            modifier = Modifier.fillMaxWidth().height(46.dp),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text(localizedUiText("احسب المسار إلى هذا المكان", "Get directions to this place"), fontWeight = FontWeight.Bold)
+                        if (routeOptions.isEmpty()) {
+                            Button(
+                                onClick = {
+                                    routeOriginText = localizedUiText("موقعي الحالي", "My current location")
+                                    routeDestinationText = place.name
+                                    calculateJourney()
+                                },
+                                enabled = !loadingRoute,
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                shape = RoundedCornerShape(13.dp)
+                            ) {
+                                Text(
+                                    if (loadingRoute) localizedUiText("جارٍ حساب المسافة...", "Calculating distance...")
+                                    else localizedUiText("احسب المسافة", "Calculate distance"),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            val chosenRoute = routeOptions.firstOrNull { it.mode == selectedRouteMode }
+                            if (chosenRoute != null) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(13.dp),
+                                    color = Color(0xFFF2F8FF)
+                                ) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(localizedUiText("المسافة والوقت المتوقع", "Distance and estimated time"), color = Color(0xFF667085), fontSize = 10.sp)
+                                            Text(
+                                                formatRouteDistance(chosenRoute.distanceMeters) + " • " + formatRouteDuration(chosenRoute.durationSeconds),
+                                                color = Navy, fontSize = 15.sp, fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Text(
+                                            if (selectedRouteMode == "pedestrian") localizedUiText("مشي", "Walk") else localizedUiText("سيارة", "Car"),
+                                            color = Blue, fontWeight = FontWeight.SemiBold, fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
+                            routeOptions.filter { it.mode != "flight" }.forEach { option ->
+                                val label = if (option.mode == "auto") localizedUiText("سيارة", "Car") else localizedUiText("مشي", "Walk")
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 5.dp).clickable {
+                                        selectedRouteMode = option.mode
+                                        currentRoute = option.geometry
+                                        (mapLibreMap?.style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(option.geometry)
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (selectedRouteMode == option.mode) Color(0xFFEAF4FF) else Color(0xFFF7F9FC)
+                                ) {
+                                    Row(Modifier.fillMaxWidth().padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(label, color = Navy, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                        Text(formatRouteDistance(option.distanceMeters) + " • " + formatRouteDuration(option.durationSeconds), color = Blue, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                            Button(
+                                onClick = { startNavigation() },
+                                enabled = !loadingRoute && !activeNavigation && selectedRouteMode != "flight",
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(49.dp),
+                                shape = RoundedCornerShape(13.dp)
+                            ) {
+                                Text(
+                                    if (activeNavigation) localizedUiText("الملاحة قيد التشغيل", "Navigation in progress")
+                                    else localizedUiText("ابدأ وجهتك", "Start your journey"),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        if (routeMessage.isNotBlank()) {
+                            Text(routeMessage, color = Color(0xFF667085), fontSize = 9.sp, modifier = Modifier.padding(top = 5.dp))
                         }
                     }
                 }
