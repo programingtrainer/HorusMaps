@@ -1245,10 +1245,10 @@ private fun buildFlightEstimate(
     )
 }
 
-private fun formatRouteDistance(meters: Double): String =
+internal fun formatRouteDistance(meters: Double): String =
     if (meters < 1000.0) "${meters.toInt()} م" else String.format(java.util.Locale.US, "%.2f كم", meters / 1000.0)
 
-private fun formatRouteDuration(seconds: Double): String {
+internal fun formatRouteDuration(seconds: Double): String {
     if (!seconds.isFinite() || seconds <= 0.0) return "—"
     val totalMinutes = kotlin.math.ceil(seconds / 60.0).toInt().coerceAtLeast(1)
     val hours = totalMinutes / 60
