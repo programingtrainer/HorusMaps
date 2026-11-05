@@ -676,15 +676,59 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
     var error by remember { mutableStateOf("") }
     val accountName = "${draft.firstName} ${draft.lastName}"
     var checked by remember { mutableStateOf(false) }
-    val available = checked && handle.matches(Regex("^[a-zA-Z][a-zA-Z0-9._]{2,19}$")) && handle.lowercase() != "admin"
-    LaunchedEffect(handle) { checked = false; delay(600); checked = handle.length >= 3 }
+    var available by remember { mutableStateOf(false) }
+    var checkingEmail by remember { mutableStateOf(false) }
+    var emailCheckFailed by remember { mutableStateOf(false) }
+    LaunchedEffect(handle) {
+        checked = false
+        available = false
+        emailCheckFailed = false
+        checkingEmail = false
+        val candidate = handle.matches(Regex("^[a-zA-Z][a-zA-Z0-9._]{2,19}$")) && handle.lowercase() != "admin"
+        if (!candidate) return@LaunchedEffect
+        delay(500)
+        checkingEmail = true
+        val result = runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val encodedHandle = java.net.URLEncoder.encode(handle, "UTF-8")
+                val connection = (java.net.URL("https://horus-maps.horus-egypt-company.workers.dev/api/email/check?handle=$encodedHandle")
+                    .openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 10_000
+                    readTimeout = 10_000
+                }
+                try {
+                    if (connection.responseCode !in 200..299) throw IllegalStateException("Email availability request failed")
+                    org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                } finally {
+                    connection.disconnect()
+                }
+            }
+        }
+        checkingEmail = false
+        checked = true
+        if (result.isSuccess) {
+            available = result.getOrThrow().optBoolean("available", false)
+        } else {
+            emailCheckFailed = true
+        }
+    }
     Box(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
             Text(localizedUiText("اختر بريد Horus Maps", "Choose your Horus Maps email"), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
             Text(localizedUiText("سيكون عنوانك الرسمي لحساب $accountName", "This will be the official address for $accountName"), color = Color(0xFF667085), modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
             OutlinedTextField(value = handle, onValueChange = { handle = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '.' || char == '_' } }, modifier = Modifier.fillMaxWidth(), singleLine = true, suffix = { Text("@horus.com") }, label = { Text(localizedUiText("اسم البريد", "Email username")) })
             Spacer(Modifier.height(12.dp))
-            Text(if (!checked) "" else if (available) localizedUiText("هذا الاسم متاح", "This username is available") else localizedUiText("لا يمكن استخدام هذا الاسم", "This username cannot be used"), color = if (available) Color(0xFF12B76A) else Color(0xFFD92D20))
+            Text(
+                when {
+                    checkingEmail -> localizedUiText("جارٍ التحقق من توفر البريد...", "Checking email availability...")
+                    !checked -> ""
+                    emailCheckFailed -> localizedUiText("تعذر التحقق من البريد. افحص اتصالك وحاول مجددًا.", "Could not verify this email. Check your connection and try again.")
+                    available -> localizedUiText("هذا الاسم متاح", "This username is available")
+                    else -> localizedUiText("اسم البريد مستخدم أو غير صالح", "This username is taken or invalid")
+                },
+                color = if (available) Color(0xFF12B76A) else Color(0xFFD92D20)
+            )
             if (error.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 Text(error, color = Color(0xFFD92D20), fontSize = 13.sp, textAlign = TextAlign.Center)
@@ -1338,11 +1382,15 @@ private fun DashboardScreen(accountName: String) {
                 providers.forEach { provider ->
                     if (manager.isProviderEnabled(provider)) {
                         manager.getLastKnownLocation(provider)?.let { last ->
-                            if (currentLocation == null || last.time > 0L) {
+                            val ageMillis = System.currentTimeMillis() - last.time
+                            if (ageMillis in 0..120_000L && (last.accuracy <= 0f || last.accuracy <= 250f)) {
                                 currentLocation = org.maplibre.android.geometry.LatLng(last.latitude, last.longitude)
+                                hasFreshLocationFix = true
                             }
                         }
-                        manager.requestLocationUpdates(provider, 5000L, 10f, listener, android.os.Looper.getMainLooper())
+                        // A 10 m minimum distance can suppress every callback while the device is stationary.
+                        // Request a prompt fix with no distance threshold, then keep updates lightweight.
+                        manager.requestLocationUpdates(provider, 1_000L, 0f, listener, android.os.Looper.getMainLooper())
                     }
                 }
             } catch (_: SecurityException) {
