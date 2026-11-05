@@ -87,6 +87,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Hotel
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.LocalGasStation
@@ -103,6 +105,9 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 
 private val Navy = Color(0xFF062A6B)
@@ -159,7 +164,7 @@ class MainActivity : ComponentActivity() {
             val deviceLayoutDirection = if (android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault()) == android.view.View.LAYOUT_DIRECTION_RTL) LayoutDirection.Rtl else LayoutDirection.Ltr
 
             LaunchedEffect(Unit) {
-                delay(5_000)
+                delay(1_400)
                 val preferences = context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE)
                 val savedName = preferences.getString("account_name", "") ?: ""
                 accountName = savedName
@@ -187,7 +192,14 @@ class MainActivity : ComponentActivity() {
                                     context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).edit().putString("account_name", accountName).apply()
                                     currentScreen = AppScreen.Dashboard
                                 })
-                                AppScreen.Dashboard -> DashboardScreen(accountName = accountName)
+                                AppScreen.Dashboard -> DashboardScreen(
+                                    accountName = accountName,
+                                    onLogout = {
+                                        context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+                                        accountName = ""
+                                        currentScreen = AppScreen.Welcome
+                                    }
+                                )
                                 AppScreen.Login -> LoginScreen(onBack = { currentScreen = AppScreen.Welcome }, onLoginSuccess = { name -> accountName = name; currentScreen = AppScreen.Dashboard }, onCreateAccount = { currentScreen = AppScreen.CreateAccount })
                                 AppScreen.Terms -> LegalScreen(title = localizedUiText("شروط الاستخدام", "Terms of Use"), onBack = { currentScreen = AppScreen.CreateAccount })
                                 AppScreen.Privacy -> LegalScreen(title = localizedUiText("سياسة الخصوصية", "Privacy Policy"), onBack = { currentScreen = AppScreen.CreateAccount })
@@ -671,6 +683,7 @@ private fun PasswordStrength(password: String, score: Int) {
 
 @Composable
 private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
     var handle by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -762,8 +775,11 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
                         }.onSuccess { result ->
                             android.os.Handler(android.os.Looper.getMainLooper()).post {
                                 loading = false
-                                if (result.optBoolean("ok")) onContinue()
-                                else error = when (result.optString("error")) {
+                                if (result.optBoolean("ok")) {
+                                    context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).edit()
+                                        .putString("account_email", "${handle}@horus.com").apply()
+                                    onContinue()
+                                } else error = when (result.optString("error")) {
                                     "email_taken" -> localizedUiText("اسم البريد مستخدم بالفعل", "This email username is already taken")
                                     "invalid_password" -> localizedUiText("كلمة المرور لا تستوفي مستوى الحماية المطلوب", "The password does not meet the required security level")
                                     else -> localizedUiText("تعذر إنشاء الحساب، حاول مرة أخرى", "Could not create the account. Please try again.")
@@ -1241,11 +1257,14 @@ private fun formatDrivingTrafficEstimate(baseSeconds: Double): String {
 }
 
 @Composable
-private fun DashboardScreen(accountName: String) {
+private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val focusManager = LocalFocusManager.current
+    var mapViewInstance by remember { mutableStateOf<org.maplibre.android.maps.MapView?>(null) }
     var mapLibreMap by remember { mutableStateOf<org.maplibre.android.maps.MapLibreMap?>(null) }
     var mapStyleLoaded by remember { mutableStateOf(false) }
+    val accountEmail = remember { context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE).getString("account_email", "").orEmpty() }
     var searchText by remember { mutableStateOf("") }
     var searchPanelExpanded by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
@@ -1319,6 +1338,56 @@ private fun DashboardScreen(accountName: String) {
                     as? org.maplibre.android.style.sources.GeoJsonSource
                 source?.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf()))
                 boundaryExpiresAt = 0L
+            }
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, mapViewInstance) {
+        val mapView = mapViewInstance
+        var started = false
+        var resumed = false
+        val observer = mapView?.let { view ->
+            LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_START -> if (!started) {
+                        view.onStart()
+                        started = true
+                    }
+                    Lifecycle.Event.ON_RESUME -> {
+                        if (!started) {
+                            view.onStart()
+                            started = true
+                        }
+                        if (!resumed) {
+                            view.onResume()
+                            resumed = true
+                        }
+                    }
+                    Lifecycle.Event.ON_PAUSE -> if (resumed) {
+                        view.onPause()
+                        resumed = false
+                    }
+                    Lifecycle.Event.ON_STOP -> {
+                        if (resumed) {
+                            view.onPause()
+                            resumed = false
+                        }
+                        if (started) {
+                            view.onStop()
+                            started = false
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        if (observer != null) lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            if (observer != null) lifecycleOwner.lifecycle.removeObserver(observer)
+            if (mapView != null) {
+                if (resumed) runCatching { mapView.onPause() }
+                if (started) runCatching { mapView.onStop() }
+                runCatching { mapView.onDestroy() }
             }
         }
     }
@@ -2287,7 +2356,7 @@ private fun DashboardScreen(accountName: String) {
                     }
                     if (remaining < 25.0) {
                         activeNavigation = false
-                        navigationStatus = localizedUiText("وصلت إلى وجهتك 🎉", "You have arrived 🎉")
+                        navigationStatus = localizedUiText("وصلت إلى وجهتك", "You have arrived")
                     }
                 }
             }
@@ -2300,9 +2369,8 @@ private fun DashboardScreen(accountName: String) {
             factory = { viewContext ->
                 org.maplibre.android.MapLibre.getInstance(viewContext)
                 org.maplibre.android.maps.MapView(viewContext).apply {
+                    mapViewInstance = this
                     onCreate(null)
-                    onStart()
-                    onResume()
                     getMapAsync { map ->
                         mapLibreMap = map
                         mapStyleLoaded = false
@@ -2544,7 +2612,7 @@ private fun DashboardScreen(accountName: String) {
                     )
                 }
         ) {
-            Text("🧭", fontSize = 22.sp, modifier = Modifier.padding(10.dp))
+            Icon(Icons.Filled.Explore, localizedUiText("البوصلة", "Compass"), tint = Navy, modifier = Modifier.padding(10.dp).size(22.dp))
         }
 
         // Request location again from the visible control if permission is not granted.
@@ -2561,7 +2629,7 @@ private fun DashboardScreen(accountName: String) {
                         ))
                     }
             ) {
-                Text("📍", fontSize = 21.sp, modifier = Modifier.padding(11.dp))
+                Icon(Icons.Filled.MyLocation, localizedUiText("موقعي", "My location"), tint = Blue, modifier = Modifier.padding(11.dp).size(21.dp))
             }
         }
 
@@ -2657,9 +2725,13 @@ private fun DashboardScreen(accountName: String) {
                                 value = routeOriginText, onValueChange = { routeOriginText = it },
                                 modifier = Modifier.fillMaxWidth(), singleLine = true,
                                 label = { Text(localizedUiText("من", "From")) },
-                                trailingIcon = { Text("📍", modifier = Modifier.clickable {
-                                    routeOriginText = localizedUiText("موقعي الحالي", "My current location")
-                                }.padding(6.dp)) }
+                                trailingIcon = {
+                                    IconButton(onClick = {
+                                        routeOriginText = localizedUiText("موقعي الحالي", "My current location")
+                                    }) {
+                                        Icon(Icons.Filled.MyLocation, localizedUiText("موقعي الحالي", "My current location"), tint = Blue)
+                                    }
+                                }
                             )
                             Spacer(Modifier.height(5.dp))
                             OutlinedTextField(
@@ -2736,7 +2808,14 @@ private fun DashboardScreen(accountName: String) {
                             }
                             if (routeMessage.isNotBlank()) Text(routeMessage, color = Color(0xFF667085), fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
                         }
-                        else -> Text(localizedUiText("مرحبًا ${accountName.ifBlank { "بك" }}. إعدادات الحساب والمعلومات الشخصية ستظهر هنا.", "Welcome ${accountName.ifBlank { "there" }}. Your account settings and personal information will appear here."), color = Color(0xFF667085), fontSize = 11.sp)
+                        else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(localizedUiText("مرحبًا ${accountName.ifBlank { "بك" }}", "Welcome ${accountName.ifBlank { "there" }}"), color = Navy, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            if (accountEmail.isNotBlank()) Text(accountEmail, color = Color(0xFF667085), fontSize = 11.sp)
+                            Text(localizedUiText("إدارة حسابك على هذا الجهاز", "Manage your account on this device"), color = Color(0xFF667085), fontSize = 11.sp)
+                            OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
+                                Text(localizedUiText("تسجيل الخروج", "Log out"))
+                            }
+                        }
                     }
                     if (loadingRoute) Text(localizedUiText("جارٍ حساب الطريق...", "Calculating route..."), color = Blue, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
                 }
