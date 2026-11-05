@@ -698,7 +698,10 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
         emailCheckFailed = false
         checkingEmail = false
         val candidate = handle.matches(Regex("^[a-zA-Z][a-zA-Z0-9._]{2,19}$")) && handle.lowercase() != "admin"
-        if (!candidate) return@LaunchedEffect
+        if (!candidate) {
+            checked = handle.length >= 3
+            return@LaunchedEffect
+        }
         delay(500)
         checkingEmail = true
         val result = runCatching {
