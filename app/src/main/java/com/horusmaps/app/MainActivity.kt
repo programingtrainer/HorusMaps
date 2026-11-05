@@ -731,6 +731,12 @@ private fun HorusEmailScreen(draft: AccountDraft, onContinue: () -> Unit, onBack
             Text(localizedUiText("اختر بريد Horus Maps", "Choose your Horus Maps email"), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
             Text(localizedUiText("سيكون عنوانك الرسمي لحساب $accountName", "This will be the official address for $accountName"), color = Color(0xFF667085), modifier = Modifier.padding(top = 8.dp, bottom = 24.dp))
             OutlinedTextField(value = handle, onValueChange = { handle = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '.' || char == '_' } }, modifier = Modifier.fillMaxWidth(), singleLine = true, suffix = { Text("@horus.com") }, label = { Text(localizedUiText("اسم البريد", "Email username")) })
+            Text(
+                localizedUiText("هذا معرّف لتسجيل الدخول داخل Horus Maps، وليس صندوق بريد لاستقبال الرسائل.", "This is an in-app sign-in ID, not a mailbox for receiving email."),
+                color = Color(0xFF667085),
+                fontSize = 10.sp,
+                modifier = Modifier.padding(top = 5.dp)
+            )
             Spacer(Modifier.height(12.dp))
             Text(
                 when {
