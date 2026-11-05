@@ -9,5 +9,16 @@ run_worker_first = true
 
 [[d1_databases]]
 binding = "Horus_maps"
-database_name = "horus-maps-db"
+database_name = "horus_maps_db"
 database_id = "8a2a8e83-98f6-4019-bf94-439bbbe80101"
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.1

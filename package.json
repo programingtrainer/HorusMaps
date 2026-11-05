@@ -4,9 +4,11 @@
   "scripts": {
     "build": "bash scripts/build_cloudflare.sh",
     "deploy": "npx wrangler deploy",
-    "preview": "npx wrangler dev"
+    "preview": "npx wrangler dev",
+    "test:worker": "node --test"
   },
   "devDependencies": {
     "wrangler": "^4.45.0"
-  }
+  },
+  "type": "module"
 }

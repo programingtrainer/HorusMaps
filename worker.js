@@ -1,13 +1,41 @@
+const APK_ORIGIN = "https://raw.githubusercontent.com/programingtrainer/HorusMaps/main/release-assets/HorusMaps.apk";
+
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "content-type"
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer"
   }
 });
+
+const methodNotAllowed = () => json({ error: "method_not_allowed" }, 405);
+
+const proxyApk = async request => {
+  const headers = new Headers();
+  for (const name of ["range", "if-range"]) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  const upstream = await fetch(APK_ORIGIN, {
+    method: request.method,
+    headers,
+    cf: { cacheEverything: true, cacheTtl: 3600 }
+  });
+  if (!upstream.ok && upstream.status !== 206) {
+    return json({ error: "download_unavailable" }, 502);
+  }
+  const responseHeaders = new Headers(upstream.headers);
+  responseHeaders.set("content-type", "application/vnd.android.package-archive");
+  responseHeaders.set("content-disposition", 'attachment; filename="HorusMaps.apk"');
+  responseHeaders.set("cache-control", "public, max-age=3600");
+  responseHeaders.set("x-content-type-options", "nosniff");
+  return new Response(request.method === "HEAD" ? null : upstream.body, {
+    status: upstream.status,
+    headers: responseHeaders
+  });
+};
 
 const normalizeEmailHandle = value => String(value ?? "")
   .trim()
@@ -62,36 +90,65 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (request.method === "OPTIONS") return json({ ok: true });
+    if (url.pathname === "/HorusMaps.apk" && (request.method === "GET" || request.method === "HEAD")) {
+      try {
+        return await proxyApk(request);
+      } catch {
+        return json({ error: "download_unavailable" }, 502);
+      }
+    }
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "horus-maps-api", database: Boolean(env.Horus_maps) });
+      if (request.method !== "GET") return methodNotAllowed();
+      if (!env.Horus_maps) return json({ ok: false, service: "horus-maps-api", database: false }, 503);
+      try {
+        await env.Horus_maps.prepare("SELECT 1").first();
+        return json({ ok: true, service: "horus-maps-api", database: true });
+      } catch {
+        return json({ ok: false, service: "horus-maps-api", database: false }, 503);
+      }
     }
 
     if (url.pathname === "/api/email/check") {
-      const handle = normalizeEmailHandle(url.searchParams.get("handle"));
-      if (handle.length < 3 || !/^[a-z][a-z0-9._]{2,19}$/.test(handle) || handle === "admin") {
+      if (request.method !== "GET") return methodNotAllowed();
+      const rawHandle = String(url.searchParams.get("handle") ?? "").trim().toLowerCase();
+      const handle = normalizeEmailHandle(rawHandle);
+      if (rawHandle !== handle || handle.length < 3 || !/^[a-z][a-z0-9._]{2,19}$/.test(handle) || handle === "admin") {
         return json({ available: false, reason: "invalid" });
       }
       if (!env.Horus_maps) return json({ available: false, reason: "database_unconfigured" }, 503);
       const email = `${handle}@horus.com`;
-      const existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
-      return json({ available: !existing, email });
+      try {
+        const existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+        return json({ available: !existing, email });
+      } catch (error) {
+        console.error(JSON.stringify({ event: "email_check_failed", errorType: error?.name ?? "Error" }));
+        return json({ available: false, reason: "database_unavailable" }, 503);
+      }
     }
 
-    if (url.pathname === "/api/auth/login" && request.method === "POST") {
+    if (url.pathname === "/api/auth/login") {
+      if (request.method !== "POST") return methodNotAllowed();
       if (!env.Horus_maps) return json({ error: "database_unconfigured" }, 503);
       let body;
       try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
       if (!email || !password) return json({ error: "invalid_credentials" }, 400);
-      const user = await env.Horus_maps.prepare("SELECT first_name, last_name, horus_email, password_salt, password_hash FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+      if (password.length > 256 || email.length > 254) return json({ error: "invalid_credentials" }, 400);
+      let user;
+      try {
+        user = await env.Horus_maps.prepare("SELECT first_name, last_name, horus_email, password_salt, password_hash FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
+      } catch (error) {
+        console.error(JSON.stringify({ event: "login_database_failed", errorType: error?.name ?? "Error" }));
+        return json({ error: "database_unavailable" }, 503);
+      }
       if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) return json({ error: "invalid_credentials" }, 401);
       return json({ ok: true, user: { name: `${user.first_name} ${user.last_name}`, email: user.horus_email } });
     }
 
-    if (url.pathname === "/api/auth/register" && request.method === "POST") {
+    if (url.pathname === "/api/auth/register") {
+      if (request.method !== "POST") return methodNotAllowed();
       if (!env.Horus_maps) return json({ error: "database_unconfigured" }, 503);
       let body;
       try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
@@ -101,29 +158,30 @@ export default {
       const phone = String(body.phone ?? "").replace(/[^0-9]/g, "");
       const country = String(body.country ?? "").trim();
       const dialCode = String(body.dialCode ?? "").trim();
-      const emailHandle = normalizeEmailHandle(body.emailHandle);
+      const rawEmailHandle = String(body.emailHandle ?? "").trim().toLowerCase();
+      const emailHandle = normalizeEmailHandle(rawEmailHandle);
       const password = String(body.password ?? "");
       const confirmPassword = String(body.confirmPassword ?? "");
       const email = `${emailHandle}@horus.com`;
 
-      if (firstName.length < 2 || lastName.length < 2) return json({ error: "invalid_name" }, 400);
-      if (!country || !/^\+[0-9]{1,4}$/.test(dialCode)) return json({ error: "invalid_country" }, 400);
-      if (!/^[a-z][a-z0-9._]{2,19}$/.test(emailHandle) || emailHandle === "admin") return json({ error: "invalid_email" }, 400);
-      if (password !== confirmPassword || passwordScore(password) < 3) return json({ error: "invalid_password" }, 400);
+      if (firstName.length < 2 || firstName.length > 60 || lastName.length < 2 || lastName.length > 60) return json({ error: "invalid_name" }, 400);
+      if (!country || country.length > 60 || phone.length > 18 || !/^\+[0-9]{1,4}$/.test(dialCode)) return json({ error: "invalid_country" }, 400);
+      if (rawEmailHandle !== emailHandle || !/^[a-z][a-z0-9._]{2,19}$/.test(emailHandle) || emailHandle === "admin") return json({ error: "invalid_email" }, 400);
+      if (password.length > 256 || password !== confirmPassword || passwordScore(password) < 3) return json({ error: "invalid_password" }, 400);
 
       let existing;
       try {
         existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
-      } catch (error) {
-        return json({ error: "database_query_failed", detail: String(error?.message ?? error) }, 500);
+      } catch {
+        return json({ error: "database_unavailable" }, 503);
       }
       if (existing) return json({ error: "email_taken" }, 409);
 
       let credentials;
       try {
         credentials = await hashPassword(password);
-      } catch (error) {
-        return json({ error: "password_hash_failed", detail: String(error?.message ?? error) }, 500);
+      } catch {
+        return json({ error: "password_hash_failed" }, 500);
       }
 
       const now = new Date().toISOString();
@@ -136,7 +194,10 @@ export default {
           .bind(id, firstName, lastName, phone || null, country, dialCode, email, credentials.salt, credentials.hash, now, now)
           .run();
       } catch (error) {
-        return json({ error: "database_insert_failed", detail: String(error?.message ?? error) }, 500);
+        const message = String(error?.message ?? error);
+        if (/unique constraint|already exists/i.test(message)) return json({ error: "email_taken" }, 409);
+        console.error(JSON.stringify({ event: "registration_insert_failed", errorType: error?.name ?? "Error" }));
+        return json({ error: "database_insert_failed" }, 500);
       }
 
       return json({ ok: true, user: { id, name: `${firstName} ${lastName}`, email } }, 201);
