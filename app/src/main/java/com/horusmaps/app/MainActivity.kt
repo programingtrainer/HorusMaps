@@ -3109,7 +3109,7 @@ private fun LegalScreen(title: String, onBack: () -> Unit) {
         )
         sections.forEach { (heading, body) ->
             Text(heading, color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 5.dp))
-            Text(body, color = Color(0xFF667085), fontSize = 12.sp, lineHeight = 19.sp)
+            Text(body, color = Color(0xFF667085), fontSize = 12.sp, style = androidx.compose.ui.text.TextStyle(lineHeight = 19.sp))
         }
         Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().height(54.dp)) {
