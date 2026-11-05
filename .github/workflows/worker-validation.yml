@@ -1,0 +1,37 @@
+name: Worker Validation
+
+on:
+  push:
+    branches:
+      - feature/pro-dashboard-map
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Worker regression tests
+        run: npm run test:worker
+
+      - name: Build Cloudflare assets
+        run: npm run build
+
+      - name: Validate Worker deployment bundle
+        run: npx wrangler deploy --dry-run
