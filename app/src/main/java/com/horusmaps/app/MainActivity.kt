@@ -1201,6 +1201,7 @@ private fun DashboardScreen(accountName: String) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     var mapLibreMap by remember { mutableStateOf<org.maplibre.android.maps.MapLibreMap?>(null) }
+    var mapStyleLoaded by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
     var searchPanelExpanded by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
@@ -2161,10 +2162,10 @@ private fun DashboardScreen(accountName: String) {
         }
     }
 
-    LaunchedEffect(currentLocation, mapLibreMap, hasFreshLocationFix) {
+    LaunchedEffect(currentLocation, mapLibreMap, hasFreshLocationFix, mapStyleLoaded) {
         val location = currentLocation
         val map = mapLibreMap
-        if (location != null && map != null) {
+        if (location != null && map != null && mapStyleLoaded) {
             val point = org.maplibre.geojson.Point.fromLngLat(location.longitude, location.latitude)
             val feature = org.maplibre.geojson.Feature.fromGeometry(point)
             val collection = org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature))
@@ -2256,7 +2257,9 @@ private fun DashboardScreen(accountName: String) {
                     onResume()
                     getMapAsync { map ->
                         mapLibreMap = map
+                        mapStyleLoaded = false
                         map.setStyle(styleUrl) { style ->
+                            mapStyleLoaded = true
                             val initialTarget = currentLocation ?: org.maplibre.android.geometry.LatLng(0.0, 0.0)
                             map.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
                                 .target(initialTarget).zoom(if (currentLocation != null) 12.5 else 2.0).build()
@@ -2535,7 +2538,11 @@ private fun DashboardScreen(accountName: String) {
             }) { Text("◎", color = Blue, fontSize = 23.sp, modifier = Modifier.padding(12.dp)) }
             Surface(shape = RoundedCornerShape(14.dp), color = Color.White, shadowElevation = 5.dp, modifier = Modifier.clickable {
                 darkMap = !darkMap
-                mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty") { style -> installMapLayers(style) }
+                mapStyleLoaded = false
+                mapLibreMap?.setStyle(if (darkMap) "https://tiles.openfreemap.org/styles/dark" else "https://tiles.openfreemap.org/styles/liberty") { style ->
+                    installMapLayers(style)
+                    mapStyleLoaded = true
+                }
             }) { Text(if (darkMap) "☀" else "◐", color = Navy, fontSize = 21.sp, modifier = Modifier.padding(13.dp)) }
             Surface(
                 shape = RoundedCornerShape(14.dp),
