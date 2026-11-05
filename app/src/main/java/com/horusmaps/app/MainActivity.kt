@@ -935,6 +935,96 @@ private data class FlightEstimate(
     val details: String
 )
 
+
+private fun searchGeocodeWithFallback(query: String, languageTag: String): org.json.JSONObject {
+    var nominatimFailure: Throwable? = null
+    try {
+        synchronized(nominatimRequestLock) {
+            val elapsed = System.currentTimeMillis() - lastNominatimRequestAt
+            if (elapsed < 1_000L) Thread.sleep(1_000L - elapsed)
+            lastNominatimRequestAt = System.currentTimeMillis()
+        }
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val encodedLanguage = java.net.URLEncoder.encode(languageTag, "UTF-8")
+        val connection = (java.net.URL(
+            "https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=jsonv2&limit=5&addressdetails=1&namedetails=1&accept-language=$encodedLanguage"
+        ).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 12_000
+            setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Accept-Language", languageTag)
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw IllegalStateException("Nominatim HTTP $code")
+            val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+            if (results.length() > 0) {
+                val source = results.getJSONObject(0)
+                return org.json.JSONObject()
+                    .put("display_name", source.optString("display_name", query))
+                    .put("lat", source.getDouble("lat"))
+                    .put("lon", source.getDouble("lon"))
+                    .put("type", source.optString("type"))
+                    .put("addresstype", source.optString("addresstype"))
+                    .put("boundingbox", source.optJSONArray("boundingbox"))
+            }
+            nominatimFailure = IllegalStateException("No Nominatim results")
+        } finally {
+            connection.disconnect()
+        }
+    } catch (error: Throwable) {
+        nominatimFailure = error
+    }
+
+    var photonConnection: java.net.HttpURLConnection? = null
+    try {
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val encodedLanguage = java.net.URLEncoder.encode(languageTag.substringBefore('-'), "UTF-8")
+        photonConnection = (java.net.URL(
+            "https://photon.komoot.io/api/?q=$encodedQuery&limit=5&lang=$encodedLanguage"
+        ).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 12_000
+            setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+            setRequestProperty("Accept", "application/geo+json, application/json")
+        }
+        val code = photonConnection.responseCode
+        if (code !in 200..299) throw IllegalStateException("Photon HTTP $code")
+        val root = org.json.JSONObject(photonConnection.inputStream.bufferedReader().use { it.readText() })
+        val features = root.optJSONArray("features") ?: org.json.JSONArray()
+        if (features.length() == 0) throw IllegalStateException("No matching place found")
+        val feature = features.getJSONObject(0)
+        val properties = feature.optJSONObject("properties") ?: org.json.JSONObject()
+        val coordinates = feature.optJSONObject("geometry")?.optJSONArray("coordinates")
+            ?: throw IllegalStateException("Search result has no coordinates")
+        if (coordinates.length() < 2) throw IllegalStateException("Search result has invalid coordinates")
+        val lat = coordinates.getDouble(1)
+        val lon = coordinates.getDouble(0)
+        val displayName = listOf(
+            properties.optString("name"),
+            properties.optString("street"),
+            properties.optString("city"),
+            properties.optString("state"),
+            properties.optString("country")
+        ).filter { it.isNotBlank() }.distinct().joinToString(", ").ifBlank { query }
+        return org.json.JSONObject()
+            .put("display_name", displayName)
+            .put("lat", lat)
+            .put("lon", lon)
+            .put("type", properties.optString("osm_value").ifBlank { properties.optString("type") })
+            .put("addresstype", properties.optString("type").ifBlank { properties.optString("osm_value") })
+    } catch (photonError: Throwable) {
+        throw IllegalStateException(
+            "Search providers failed. Nominatim: " + (nominatimFailure?.message ?: "no results") +
+                "; Photon: " + (photonError.message ?: "unknown error"),
+            photonError
+        )
+    } finally {
+        photonConnection?.disconnect()
+    }
+}
+
 private fun fetchPlacesFromOverpass(query: String): org.json.JSONObject {
     val endpoints = listOf(
         "https://overpass-api.de/api/interpreter",
@@ -1466,31 +1556,7 @@ private fun DashboardScreen(accountName: String) {
         val deviceLocale = java.util.Locale.getDefault()
         val languageTag = deviceLocale.toLanguageTag()
         Thread {
-            runCatching {
-                // Public Nominatim has a strict one-request-per-second limit.
-                synchronized(nominatimRequestLock) {
-                    val elapsed = System.currentTimeMillis() - lastNominatimRequestAt
-                    if (elapsed < 1_000L) Thread.sleep(1_000L - elapsed)
-                    lastNominatimRequestAt = System.currentTimeMillis()
-                }
-                val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                val encodedLanguage = java.net.URLEncoder.encode(languageTag, "UTF-8")
-                val url = java.net.URL(
-                    "https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=jsonv2&limit=10&addressdetails=1&namedetails=1&polygon_geojson=1&polygon_threshold=0.0&accept-language=$encodedLanguage"
-                )
-                val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 15000
-                connection.readTimeout = 20000
-                connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
-                connection.setRequestProperty("Accept-Language", languageTag)
-                val results = org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
-                if (results.length() == 0) throw IllegalStateException(
-                    if (deviceLocale.language == "ar") localizedUiText("لم يتم العثور على نتيجة. جرّب اسم الشارع أو الحي أو المدينة.", "No results found. Try a street, district, or city name.") 
-                    else "No matching place found. Try a street, district, city or region name."
-                )
-                // Nominatim returns the most relevant matches first.
-                results.getJSONObject(0)
-            }.onSuccess { result ->
+            runCatching { searchGeocodeWithFallback(query, languageTag) }            }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     searching = false
                     searchMessage = result.optString("display_name", query)
@@ -1579,9 +1645,12 @@ private fun DashboardScreen(accountName: String) {
     }
 
     fun loadNearbyPlaces(category: String = selectedPoiCategory, searchTerm: String = "") {
-        val origin = currentLocation ?: mapLibreMap?.cameraPosition?.target
+        val origin = currentLocation ?: mapLibreMap?.cameraPosition?.target?.takeIf { it.latitude != 0.0 || it.longitude != 0.0 }
         if (origin == null || loadingNearby) {
-            if (origin == null) poiSearchMessage = localizedUiText("حدد موقعك أو حرّك الخريطة إلى المنطقة المطلوبة أولًا", "Set your location or move the map to the area you want to search")
+            if (origin == null) {
+                poiSearchMessage = localizedUiText("اسمح بالوصول إلى موقعك أو حرّك الخريطة إلى منطقتك أولًا", "Allow location access or move the map to your area first")
+                if (!hasLocationPermission) permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+            }
             return
         }
         loadingNearby = true
