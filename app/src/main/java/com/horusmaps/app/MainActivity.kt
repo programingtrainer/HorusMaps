@@ -1234,6 +1234,7 @@ private fun DashboardScreen(accountName: String) {
     var hasCenteredOnFreshLocation by remember { mutableStateOf(false) }
     var nearbyPlaces by remember { mutableStateOf<List<NearbyPlace>>(emptyList()) }
     var loadingNearby by remember { mutableStateOf(false) }
+    var nearbyRequestId by remember { mutableStateOf(0) }
     var selectedPlace by remember { mutableStateOf<NearbyPlace?>(null) }
     var selectedPoiCategory by remember { mutableStateOf("all") }
     var poiSearchMessage by remember { mutableStateOf("") }
@@ -1646,13 +1647,14 @@ private fun DashboardScreen(accountName: String) {
 
     fun loadNearbyPlaces(category: String = selectedPoiCategory, searchTerm: String = "") {
         val origin = currentLocation ?: mapLibreMap?.cameraPosition?.target?.takeIf { it.latitude != 0.0 || it.longitude != 0.0 }
-        if (origin == null || loadingNearby) {
-            if (origin == null) {
-                poiSearchMessage = localizedUiText("اسمح بالوصول إلى موقعك أو حرّك الخريطة إلى منطقتك أولًا", "Allow location access or move the map to your area first")
-                if (!hasLocationPermission) permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
-            }
+        if (origin == null) {
+            poiSearchMessage = localizedUiText("اسمح بالوصول إلى موقعك أو حرّك الخريطة إلى منطقتك أولًا", "Allow location access or move the map to your area first")
+            if (!hasLocationPermission) permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
             return
         }
+        // A new request supersedes any older request; slow providers must never lock the UI.
+        val requestId = nearbyRequestId + 1
+        nearbyRequestId = requestId
         loadingNearby = true
         poiSearchMessage = localizedUiText("جارٍ البحث عن الأماكن القريبة...", "Searching nearby places...")
         Thread {
@@ -1726,6 +1728,7 @@ private fun DashboardScreen(accountName: String) {
                     .map { it.first }
             }.onSuccess { places ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (requestId != nearbyRequestId) return@post
                     nearbyPlaces = places
                     loadingNearby = false
                     poiSearchMessage = if (places.isEmpty()) {
@@ -1737,6 +1740,7 @@ private fun DashboardScreen(accountName: String) {
                 }
             }.onFailure { error ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (requestId != nearbyRequestId) return@post
                     loadingNearby = false
                     poiSearchMessage = localizedUiText(
                         "مصادر بيانات الأماكن مشغولة مؤقتًا. جرّب مرة أخرى بعد لحظات.",
@@ -1749,7 +1753,7 @@ private fun DashboardScreen(accountName: String) {
 
     fun searchFromMainBar() {
         val raw = searchText.trim()
-        if (raw.isBlank() || loadingNearby || searching) return
+        if (raw.isBlank() || searching) return
         val normalized = raw.lowercase(java.util.Locale.ROOT)
         val category = when {
             listOf("سوبر ماركت", "سوبرماركت", "بقالة", "supermarket", "grocery", "panda", "بنده", "بندة", "كارفور", "carrefour", "لولو", "lulu").any { normalized.contains(it) } -> "shopping"
@@ -2166,7 +2170,7 @@ private fun DashboardScreen(accountName: String) {
             val collection = org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf(feature))
             (map.style?.getSource("horus-user-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(collection)
             if (hasFreshLocationFix && !hasCenteredOnFreshLocation) {
-                map.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(location, 14.5))
+                map.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(location, 15.0), 900)
                 hasCenteredOnFreshLocation = true
             }
         }
@@ -2361,7 +2365,7 @@ private fun DashboardScreen(accountName: String) {
                     Spacer(Modifier.width(7.dp))
                     IconButton(
                         onClick = { searchFromMainBar() },
-                        enabled = !searching && !loadingNearby,
+                        enabled = !searching,
                         modifier = Modifier.size(48.dp).background(Blue, RoundedCornerShape(12.dp))
                     ) {
                         Text(if (searching) "…" else "⌕", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
@@ -2396,7 +2400,7 @@ private fun DashboardScreen(accountName: String) {
                             Surface(
                                 shape = RoundedCornerShape(20.dp),
                                 color = if (selected) Blue else Color(0xFFF2F4F7),
-                                modifier = Modifier.animateContentSize(tween(180)).clickable(enabled = !loadingNearby) {
+                                modifier = Modifier.animateContentSize(tween(180)).clickable {
                                     selectedPoiCategory = key
                                     selectedPlace = null
                                     loadNearbyPlaces(key, "")
