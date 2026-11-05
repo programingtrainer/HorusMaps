@@ -116,3 +116,26 @@ test("API endpoints reject unsupported HTTP methods", async () => {
   });
   assert.equal(response.status, 405);
 });
+
+test("APK endpoint streams the binary and forwards byte-range requests", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "https://raw.githubusercontent.com/programingtrainer/HorusMaps/main/release-assets/HorusMaps.apk");
+    assert.equal(options.headers.get("range"), "bytes=0-6");
+    return new Response("APKDATA", {
+      status: 206,
+      headers: { "content-range": "bytes 0-6/7", "content-length": "7" }
+    });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://horus.test/HorusMaps.apk", {
+      headers: { range: "bytes=0-6" }
+    }), {});
+    assert.equal(response.status, 206);
+    assert.equal(response.headers.get("content-type"), "application/vnd.android.package-archive");
+    assert.equal(response.headers.get("content-disposition"), 'attachment; filename="HorusMaps.apk"');
+    assert.equal(await response.text(), "APKDATA");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
