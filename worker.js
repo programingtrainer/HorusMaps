@@ -70,13 +70,11 @@ const nearbyPlaces = async (request, context) => {
     return json({ error: "invalid_nearby_search" }, 400);
   }
 
-  const normalizedTerm = rawTerm.replace(/[^\\p{L}\\p{N}\\s-]/gu, " ").trim();
+  const normalizedTerm = rawTerm.replace(/[^\p{L}\p{N}\s-]/gu, " ").trim();
   const safeTerm = normalizedTerm
     ? (/(بندة|بنده|panda)/i.test(normalizedTerm)
       ? "(Panda|بندة|بنده)"
-      : normalizedTerm.split(/\\s+/).filter(Boolean).map(word =>
-          word.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\const normalizeEmailHandle =")
-        ).join(".*"))
+      : normalizedTerm.split(/\s+/).filter(Boolean).join(".*"))
     : "";
   const nameFilter = safeTerm
     ? '[~"^(name(:.*)?|brand(:.*)?|operator(:.*)?)$"~"' + safeTerm + '",i]'
