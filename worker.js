@@ -1,12 +1,13 @@
 const APK_ORIGIN = "https://raw.githubusercontent.com/programingtrainer/HorusMaps/main/release-assets/HorusMaps.apk";
 
-const json = (data, status = 200) => new Response(JSON.stringify(data), {
+const json = (data, status = 200, extraHeaders = {}) => new Response(JSON.stringify(data), {
   status,
   headers: {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer"
+    "referrer-policy": "no-referrer",
+    ...extraHeaders
   }
 });
 
@@ -35,6 +36,97 @@ const proxyApk = async request => {
     status: upstream.status,
     headers: responseHeaders
   });
+};
+
+const nearbyFilters = {
+  all: [
+    '[amenity~"^(restaurant|cafe|fast_food|hospital|clinic|pharmacy|fuel|atm|bank|place_of_worship)$"]',
+    '[shop~"^(supermarket|convenience|mall|department_store)$"]',
+    '[leisure~"^(park|garden|playground|nature_reserve)$"]',
+    '[tourism~"^(hotel|hostel|motel|guest_house)$"]',
+    '[railway~"^(station|halt|tram_stop)$"]'
+  ],
+  food: ['[amenity~"^(restaurant|cafe|fast_food|food_court|ice_cream)$"]'],
+  fuel: ['[amenity="fuel"]'],
+  health: ['[amenity~"^(hospital|clinic|doctors|pharmacy)$"]'],
+  parks: ['[leisure~"^(park|garden|playground|nature_reserve)$"]'],
+  shopping: ['[shop~"^(supermarket|convenience|mall|department_store)$"]'],
+  stay: ['[tourism~"^(hotel|hostel|motel|guest_house)$"]'],
+  atm: ['[amenity~"^(atm|bank)$"]'],
+  mosques: ['[amenity="place_of_worship"][religion="muslim"]'],
+  stations: ['[railway~"^(station|halt|tram_stop)$"]']
+};
+
+const nearbyPlaces = async (request, context) => {
+  if (request.method !== "GET") return methodNotAllowed();
+  const url = new URL(request.url);
+  const lat = Number(url.searchParams.get("lat"));
+  const lon = Number(url.searchParams.get("lon"));
+  const category = String(url.searchParams.get("category") || "all").toLowerCase();
+  const rawTerm = String(url.searchParams.get("q") || "").trim().slice(0, 80);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 ||
+      !Number.isFinite(lon) || lon < -180 || lon > 180 ||
+      !nearbyFilters[category]) {
+    return json({ error: "invalid_nearby_search" }, 400);
+  }
+
+  const normalizedTerm = rawTerm.replace(/[^\\p{L}\\p{N}\\s-]/gu, " ").trim();
+  const safeTerm = normalizedTerm
+    ? (/(بندة|بنده|panda)/i.test(normalizedTerm)
+      ? "(Panda|بندة|بنده)"
+      : normalizedTerm.split(/\\s+/).filter(Boolean).map(word =>
+          word.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\const normalizeEmailHandle =")
+        ).join(".*"))
+    : "";
+  const nameFilter = safeTerm
+    ? '[~"^(name(:.*)?|brand(:.*)?|operator(:.*)?)$"~"' + safeTerm + '",i]'
+    : "[name]";
+  const radius = normalizedTerm ? 8000 : 5000;
+  const selectors = nearbyFilters[category].map(filter =>
+    "nwr(around:" + radius + "," + lat + "," + lon + ")" + filter + nameFilter + ";"
+  ).join("");
+  const query = "[out:json][timeout:10];(" + selectors + ");out center tags 60;";
+
+  const roundedLat = lat.toFixed(3);
+  const roundedLon = lon.toFixed(3);
+  const cacheUrl = new URL("/api/places/cache?lat=" + roundedLat +
+    "&lon=" + roundedLon + "&category=" + category +
+    "&q=" + encodeURIComponent(normalizedTerm.toLowerCase()), url.origin);
+  const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  if (cache) {
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+  }
+
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+  ];
+  try {
+    const payload = "data=" + encodeURIComponent(query);
+    const result = await Promise.any(endpoints.map(async endpoint => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "accept": "application/json",
+          "user-agent": "HorusMaps/1.0"
+        },
+        body: payload,
+        signal: AbortSignal.timeout(8500)
+      });
+      if (!response.ok) throw new Error("Overpass HTTP " + response.status);
+      const data = await response.json();
+      if (!Array.isArray(data.elements)) throw new Error("Invalid Overpass response");
+      return data;
+    }));
+    const response = json(result, 200, { "cache-control": "public, max-age=60, s-maxage=120" });
+    if (cache && context?.waitUntil) context.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
+  } catch {
+    return json({ error: "nearby_provider_unavailable" }, 503, { "retry-after": "5" });
+  }
 };
 
 const normalizeEmailHandle = value => String(value ?? "")
@@ -87,7 +179,7 @@ const hashPassword = async password => {
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, context) {
     const url = new URL(request.url);
 
     if (url.pathname === "/HorusMaps.apk" && (request.method === "GET" || request.method === "HEAD")) {
@@ -96,6 +188,10 @@ export default {
       } catch {
         return json({ error: "download_unavailable" }, 502);
       }
+    }
+
+    if (url.pathname === "/api/places") {
+      return nearbyPlaces(request, context);
     }
 
     if (url.pathname === "/api/health") {
