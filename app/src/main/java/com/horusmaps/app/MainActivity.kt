@@ -8,6 +8,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -68,6 +70,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +86,16 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Hotel
+import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.LocalHospital
+import androidx.compose.material.icons.filled.Park
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Train
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Visibility
@@ -759,19 +773,30 @@ private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
     }
 }
 
-private fun nearbyPlaceIcon(category: String): String = when (category.lowercase(java.util.Locale.ROOT)) {
-    "restaurant", "fast_food", "food_court" -> "◆"
-    "cafe", "coffee" -> "☕"
-    "fuel" -> "⛽"
-    "hospital", "clinic", "doctors" -> "✚"
-    "pharmacy" -> "+"
-    "park", "garden", "playground" -> "♣"
-    "supermarket", "convenience", "mall" -> "▦"
-    "hotel", "hostel" -> "⌂"
-    "atm", "bank" -> "▣"
-    "place_of_worship", "mosque", "masjid" -> "🕌"
-    "station", "railway", "train_station" -> "🚉"
-    else -> "•"
+private fun nearbyPlaceIcon(category: String): ImageVector = when (category.lowercase(java.util.Locale.ROOT)) {
+    "restaurant", "fast_food", "food_court", "cafe", "coffee" -> Icons.Filled.Restaurant
+    "fuel" -> Icons.Filled.LocalGasStation
+    "hospital", "clinic", "doctors", "pharmacy" -> Icons.Filled.LocalHospital
+    "park", "garden", "playground", "nature_reserve" -> Icons.Filled.Park
+    "supermarket", "convenience", "mall", "department_store" -> Icons.Filled.ShoppingCart
+    "hotel", "hostel", "motel", "guest_house" -> Icons.Filled.Hotel
+    "atm", "bank" -> Icons.Filled.AccountBalance
+    "place_of_worship", "mosque", "masjid" -> Icons.Filled.Place
+    "station", "railway", "train_station", "halt", "tram_stop" -> Icons.Filled.Train
+    else -> Icons.Filled.Place
+}
+
+private fun nearbyPlaceColor(category: String): String = when (category.lowercase(java.util.Locale.ROOT)) {
+    "restaurant", "fast_food", "food_court", "cafe", "coffee" -> "#E87932"
+    "fuel" -> "#0B84C6"
+    "hospital", "clinic", "doctors", "pharmacy" -> "#D64545"
+    "park", "garden", "playground", "nature_reserve" -> "#26966A"
+    "supermarket", "convenience", "mall", "department_store" -> "#3267C8"
+    "hotel", "hostel", "motel", "guest_house" -> "#7956B8"
+    "atm", "bank" -> "#16877A"
+    "place_of_worship", "mosque", "masjid" -> "#B78328"
+    "station", "railway", "train_station", "halt", "tram_stop" -> "#526477"
+    else -> "#0879D8"
 }
 
 private data class NearbyPlace(
@@ -905,6 +930,45 @@ private data class FlightEstimate(
     val geometry: org.maplibre.geojson.LineString,
     val details: String
 )
+
+private fun fetchPlacesFromOverpass(query: String): org.json.JSONObject {
+    val endpoints = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter"
+    )
+    var lastError: Throwable? = null
+    endpoints.forEach { endpoint ->
+        var connection: java.net.HttpURLConnection? = null
+        try {
+            connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 9_000
+                readTimeout = 18_000
+                doOutput = true
+                setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+            }
+            val payload = "data=" + java.net.URLEncoder.encode(query, "UTF-8")
+            connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code in 200..299) return org.json.JSONObject(body)
+            lastError = IllegalStateException("HTTP $code")
+            if (code !in listOf(429, 500, 502, 503, 504)) throw lastError!!
+        } catch (error: Throwable) {
+            lastError = error
+        } finally {
+            connection?.disconnect()
+        }
+    }
+    throw IllegalStateException(
+        "Nearby places providers are temporarily unavailable",
+        lastError
+    )
+}
 
 private fun getJson(urlText: String, userAgent: String = "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)"): org.json.JSONObject {
     val connection = java.net.URL(urlText).openConnection() as java.net.HttpURLConnection
@@ -1044,6 +1108,7 @@ private fun DashboardScreen(accountName: String) {
     val focusManager = LocalFocusManager.current
     var mapLibreMap by remember { mutableStateOf<org.maplibre.android.maps.MapLibreMap?>(null) }
     var searchText by remember { mutableStateOf("") }
+    var searchPanelExpanded by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var boundaryExpiresAt by remember { mutableStateOf(0L) }
     var continentGeoJson by remember { mutableStateOf<String?>(null) }
@@ -1311,7 +1376,7 @@ private fun DashboardScreen(accountName: String) {
             ).apply {
                 addStringProperty("name", place.name)
                 addStringProperty("category", place.category)
-                addStringProperty("icon", nearbyPlaceIcon(place.category))
+                addStringProperty("color", nearbyPlaceColor(place.category))
             }
         }
         val collection = org.maplibre.geojson.FeatureCollection.fromFeatures(features)
@@ -1555,15 +1620,7 @@ private fun DashboardScreen(accountName: String) {
                 }
                 val query = "[out:json][timeout:25];($selectors);out center tags 100;"
                 val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-                val connection = java.net.URL("https://overpass-api.de/api/interpreter?data=$encoded").openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 15000
-                connection.readTimeout = 30000
-                connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val body = stream.bufferedReader().use { it.readText() }
-                if (code !in 200..299) throw IllegalStateException("Places service returned HTTP $code")
-                val root = org.json.JSONObject(body)
+                val root = fetchPlacesFromOverpass(query)
                 val elements = root.optJSONArray("elements") ?: org.json.JSONArray()
                 val places = mutableListOf<Pair<NearbyPlace, Double>>()
                 for (index in 0 until elements.length()) {
@@ -1609,7 +1666,10 @@ private fun DashboardScreen(accountName: String) {
             }.onFailure { error ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingNearby = false
-                    poiSearchMessage = error.message ?: localizedUiText("تعذر تحميل الأماكن القريبة. حاول مرة أخرى.", "Could not load nearby places. Please try again.")
+                    poiSearchMessage = localizedUiText(
+                        "مصادر بيانات الأماكن مشغولة مؤقتًا. جرّب مرة أخرى بعد لحظات.",
+                        "Nearby place providers are temporarily busy. Please try again in a moment."
+                    )
                 }
             }
         }.start()
@@ -1995,21 +2055,12 @@ private fun DashboardScreen(accountName: String) {
                 "horus-nearby-source", org.maplibre.geojson.FeatureCollection.fromFeatures(arrayOf())
             ))
             style.addLayer(org.maplibre.android.style.layers.CircleLayer("horus-nearby-layer", "horus-nearby-source").withProperties(
-                org.maplibre.android.style.layers.PropertyFactory.circleColor(android.graphics.Color.parseColor("#F59E0B")),
+                org.maplibre.android.style.layers.PropertyFactory.circleColor(
+                    org.maplibre.android.style.expressions.Expression.get("color")
+                ),
                 org.maplibre.android.style.layers.PropertyFactory.circleRadius(7f),
                 org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
                 org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f)
-            ))
-            style.addLayer(org.maplibre.android.style.layers.SymbolLayer("horus-nearby-icon-layer", "horus-nearby-source").withProperties(
-                org.maplibre.android.style.layers.PropertyFactory.textField(
-                    org.maplibre.android.style.expressions.Expression.get("icon")
-                ),
-                org.maplibre.android.style.layers.PropertyFactory.textSize(13f),
-                org.maplibre.android.style.layers.PropertyFactory.textColor(android.graphics.Color.parseColor("#062A6B")),
-                org.maplibre.android.style.layers.PropertyFactory.textHaloColor(android.graphics.Color.WHITE),
-                org.maplibre.android.style.layers.PropertyFactory.textHaloWidth(1.5f),
-                org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap(true),
-                org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement(true)
             ))
         }
         if (style.getSource("horus-route-source") == null) {
@@ -2144,7 +2195,7 @@ private fun DashboardScreen(accountName: String) {
                                             layerId.contains("station", ignoreCase = true) ||
                                             layerId.contains("transit", ignoreCase = true)
                                     }.orEmpty()
-                                val queryLayers = (listOf("horus-nearby-icon-layer", "horus-nearby-layer") + nativePoiLayers)
+                                val queryLayers = (listOf("horus-nearby-layer") + nativePoiLayers)
                                     .distinct().toTypedArray()
                                 val hit = runCatching {
                                     map.queryRenderedFeatures(screenPoint, *queryLayers).firstOrNull()
@@ -2213,7 +2264,9 @@ private fun DashboardScreen(accountName: String) {
                     OutlinedTextField(
                         value = searchText,
                         onValueChange = { searchText = it },
-                        modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 56.dp).onFocusChanged { state ->
+                            if (state.isFocused) searchPanelExpanded = true
+                        },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         placeholder = { Text(localizedUiText("ابحث عن مكان أو خدمة قريبة أو عنوان", "Search nearby places, services, or an address"), fontSize = 12.sp) },
@@ -2221,6 +2274,18 @@ private fun DashboardScreen(accountName: String) {
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { searchFromMainBar() })
                     )
+                    if (searchPanelExpanded) {
+                        IconButton(
+                            onClick = {
+                                searchPanelExpanded = false
+                                searchText = ""
+                                focusManager.clearFocus()
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.Outlined.Close, localizedUiText("إغلاق البحث", "Close search"), tint = Color(0xFF667085))
+                        }
+                    }
                     Spacer(Modifier.width(7.dp))
                     IconButton(
                         onClick = { searchFromMainBar() },
@@ -2231,23 +2296,28 @@ private fun DashboardScreen(accountName: String) {
                     }
                 }
             }
-            Surface(shape = RoundedCornerShape(14.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 4.dp) {
+            AnimatedVisibility(
+                visible = searchPanelExpanded,
+                enter = fadeIn(tween(220)) + expandVertically(tween(260, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(160)) + shrinkVertically(tween(190, easing = FastOutSlowInEasing))
+            ) {
+            Surface(shape = RoundedCornerShape(14.dp), color = Color.White.copy(alpha = 0.98f), shadowElevation = 7.dp) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp)) {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         val categories = listOf(
-                            Triple("all", localizedUiText("الكل", "All"), "⌕"),
-                            Triple("food", localizedUiText("مطاعم وكافيهات", "Food & cafes"), "◆"),
-                            Triple("fuel", localizedUiText("محطات بنزين", "Gas stations"), "⛽"),
-                            Triple("health", localizedUiText("مستشفيات وصيدليات", "Health"), "✚"),
-                            Triple("parks", localizedUiText("منتزهات", "Parks"), "♣"),
-                            Triple("shopping", localizedUiText("تسوق", "Shopping"), "▦"),
-                            Triple("stay", localizedUiText("فنادق", "Hotels"), "⌂"),
-                            Triple("atm", localizedUiText("بنوك وATM", "Banks & ATMs"), "▣"),
-                            Triple("mosques", localizedUiText("جوامع", "Mosques"), "🕌"),
-                            Triple("stations", localizedUiText("محطات قطار", "Train stations"), "🚉")
+                            Triple("all", localizedUiText("الكل", "All"), nearbyPlaceIcon("all")),
+                            Triple("food", localizedUiText("مطاعم وكافيهات", "Food & cafes"), nearbyPlaceIcon("restaurant")),
+                            Triple("fuel", localizedUiText("محطات بنزين", "Gas stations"), nearbyPlaceIcon("fuel")),
+                            Triple("health", localizedUiText("مستشفيات وصيدليات", "Health"), nearbyPlaceIcon("hospital")),
+                            Triple("parks", localizedUiText("منتزهات", "Parks"), nearbyPlaceIcon("park")),
+                            Triple("shopping", localizedUiText("تسوق", "Shopping"), nearbyPlaceIcon("supermarket")),
+                            Triple("stay", localizedUiText("فنادق", "Hotels"), nearbyPlaceIcon("hotel")),
+                            Triple("atm", localizedUiText("بنوك وATM", "Banks & ATMs"), nearbyPlaceIcon("atm")),
+                            Triple("mosques", localizedUiText("جوامع", "Mosques"), nearbyPlaceIcon("mosque")),
+                            Triple("stations", localizedUiText("محطات قطار", "Train stations"), nearbyPlaceIcon("station"))
                         )
                         categories.forEach { (key, label, icon) ->
                             val selected = selectedPoiCategory == key
@@ -2261,7 +2331,7 @@ private fun DashboardScreen(accountName: String) {
                                 }
                             ) {
                                 Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(icon, color = if (selected) Color.White else Navy, fontSize = 13.sp)
+                                    Icon(icon, contentDescription = null, tint = if (selected) Color.White else Navy, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(5.dp))
                                     Text(label, color = if (selected) Color.White else Navy, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                 }
@@ -2292,7 +2362,7 @@ private fun DashboardScreen(accountName: String) {
                                     }.padding(vertical = 3.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 13.sp)
+                                    Icon(nearbyPlaceIcon(place.category), contentDescription = null, tint = Blue, modifier = Modifier.size(17.dp))
                                     Spacer(Modifier.width(7.dp))
                                     Text(place.name, color = Navy, fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
                                     if (reference != null) {
@@ -2303,6 +2373,7 @@ private fun DashboardScreen(accountName: String) {
                         }
                     }
                 }
+            }
             }
             if (activeNavigation) {
                 Surface(shape = RoundedCornerShape(13.dp), color = Color.White.copy(alpha = 0.97f), shadowElevation = 5.dp) {
@@ -2558,7 +2629,7 @@ private fun DashboardScreen(accountName: String) {
                 ) {
                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 22.sp)
+                            Icon(nearbyPlaceIcon(place.category), contentDescription = null, tint = Blue, modifier = Modifier.size(25.dp))
                             Spacer(Modifier.width(9.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(place.name, color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
