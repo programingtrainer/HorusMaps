@@ -1190,54 +1190,31 @@ private fun searchGeocodeWithFallback(query: String, languageTag: String): org.j
     }
 }
 
-private fun fetchPlacesFromOverpass(query: String): org.json.JSONObject {
-    val endpoints = listOf(
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter"
-    )
-    val executor = java.util.concurrent.Executors.newFixedThreadPool(endpoints.size)
+private fun fetchPlacesFromOverpass(
+    latitude: Double,
+    longitude: Double,
+    category: String,
+    searchTerm: String
+): org.json.JSONObject {
+    val query = "https://horus-maps.horus-egypt-company.workers.dev/api/places" +
+        "?lat=" + latitude +
+        "&lon=" + longitude +
+        "&category=" + java.net.URLEncoder.encode(category, "UTF-8") +
+        "&q=" + java.net.URLEncoder.encode(searchTerm, "UTF-8")
+    val connection = java.net.URL(query).openConnection() as java.net.HttpURLConnection
     try {
-        val completion = java.util.concurrent.ExecutorCompletionService<org.json.JSONObject>(executor)
-        endpoints.forEach { endpoint ->
-            completion.submit(java.util.concurrent.Callable {
-                val connection = java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection
-                try {
-                    connection.requestMethod = "POST"
-                    connection.connectTimeout = 4_500
-                    connection.readTimeout = 8_000
-                    connection.doOutput = true
-                    connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
-                    connection.setRequestProperty("Accept", "application/json")
-                    connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-                    val payload = "data=" + java.net.URLEncoder.encode(query, "UTF-8")
-                    connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-                    val code = connection.responseCode
-                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                    val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                    if (code !in 200..299) throw IllegalStateException("Overpass HTTP " + code)
-                    org.json.JSONObject(body)
-                } finally {
-                    connection.disconnect()
-                }
-            })
-        }
-        var remaining = endpoints.size
-        var lastError: Throwable? = null
-        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
-        while (remaining > 0) {
-            val waitNanos = deadline - System.nanoTime()
-            if (waitNanos <= 0) break
-            val completed = completion.poll(waitNanos, java.util.concurrent.TimeUnit.NANOSECONDS) ?: break
-            remaining--
-            try {
-                return completed.get()
-            } catch (error: Exception) {
-                lastError = error
-            }
-        }
-        throw IllegalStateException("Nearby places providers are temporarily unavailable", lastError)
+        connection.requestMethod = "GET"
+        connection.connectTimeout = 4_500
+        connection.readTimeout = 9_500
+        connection.setRequestProperty("Accept", "application/json")
+        connection.setRequestProperty("User-Agent", "HorusMaps/1.0")
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (code !in 200..299) throw IllegalStateException("Nearby service HTTP " + code)
+        return org.json.JSONObject(body)
     } finally {
-        executor.shutdownNow()
+        connection.disconnect()
     }
 }
 
@@ -1913,42 +1890,9 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
         poiSearchMessage = localizedUiText("جارٍ البحث عن الأماكن القريبة...", "Searching nearby places...")
         Thread {
             runCatching {
-                val radiusMeters = if (searchTerm.isBlank()) 5_000 else 8_000
                 val lat = origin.latitude
                 val lon = origin.longitude
-                val categoryFilters = when (category) {
-                    "food" -> listOf("""[amenity~"^(restaurant|cafe|fast_food|food_court|ice_cream)$"]""")
-                    "fuel" -> listOf("""[amenity="fuel"]""")
-                    "health" -> listOf("""[amenity~"^(hospital|clinic|doctors|pharmacy)$"]""")
-                    "parks" -> listOf("""[leisure~"^(park|garden|playground|nature_reserve)$"]""")
-                    "shopping" -> listOf("""[shop~"^(supermarket|convenience|mall|department_store)$"]""")
-                    "stay" -> listOf("""[tourism~"^(hotel|hostel|motel|guest_house)$"]""")
-                    "atm" -> listOf("""[amenity~"^(atm|bank)$"]""")
-                    "mosques" -> listOf("""[amenity="place_of_worship"][religion="muslim"]""")
-                    "stations" -> listOf("""[railway~"^(station|halt|tram_stop)$"]""")
-                    else -> listOf(
-                        """[amenity~"^(restaurant|cafe|fast_food|hospital|clinic|pharmacy|fuel|atm|bank|place_of_worship)$"]""",
-                        """[shop~"^(supermarket|convenience|mall|department_store)$"]""",
-                        """[leisure~"^(park|garden|playground|nature_reserve)$"]""",
-                        """[tourism~"^(hotel|hostel|motel|guest_house)$"]""",
-                        """[railway~"^(station|halt|tram_stop)$"]"""
-                    )
-                }
-                val nameFilter = searchTerm.trim().takeIf { it.isNotBlank() }?.let { raw ->
-                    val safe = if (raw.contains("بندة") || raw.contains("بنده")) {
-                        "(Panda|بندة|بنده)"
-                    } else {
-                        raw.trim().split(Regex("\\s+"))
-                            .filter { it.isNotBlank() }
-                            .joinToString(".*") { word -> word.filter { it.isLetterOrDigit() || it == '-' } }
-                    }
-                    """[~"^(name(:.*)?|brand(:.*)?|operator(:.*)?)$"~"$safe",i]"""
-                } ?: "[name]"
-                val selectors = categoryFilters.joinToString("") { filter ->
-                    "nwr(around:$radiusMeters,$lat,$lon)$filter$nameFilter;"
-                }
-                val query = "[out:json][timeout:10];($selectors);out center tags 60;"
-                val root = fetchPlacesFromOverpass(query)
+                val root = fetchPlacesFromOverpass(lat, lon, category, searchTerm)
                 val elements = root.optJSONArray("elements") ?: org.json.JSONArray()
                 val places = mutableListOf<Pair<NearbyPlace, Double>>()
                 for (index in 0 until elements.length()) {
