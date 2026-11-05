@@ -1246,14 +1246,16 @@ private fun buildFlightEstimate(
 }
 
 internal fun formatRouteDistance(meters: Double): String =
-    if (meters < 1000.0) "${meters.toInt()} م" else String.format(java.util.Locale.US, "%.2f كم", meters / 1000.0)
+    if (meters < 1000.0) "${meters.toInt()} ${localizedUiText("م", "m")}"
+    else String.format(java.util.Locale.US, "%.2f %s", meters / 1000.0, localizedUiText("كم", "km"))
 
 internal fun formatRouteDuration(seconds: Double): String {
     if (!seconds.isFinite() || seconds <= 0.0) return "—"
     val totalMinutes = kotlin.math.ceil(seconds / 60.0).toInt().coerceAtLeast(1)
     val hours = totalMinutes / 60
     val minutes = totalMinutes % 60
-    return if (hours > 0) "${hours} س ${minutes} د" else "${minutes} د"
+    return if (hours > 0) localizedUiText("${hours} س ${minutes} د", "${hours} h ${minutes} min")
+    else localizedUiText("${minutes} د", "${minutes} min")
 }
 
 private fun formatDrivingTrafficEstimate(baseSeconds: Double): String {
