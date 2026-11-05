@@ -162,10 +162,10 @@ export default {
       const confirmPassword = String(body.confirmPassword ?? "");
       const email = `${emailHandle}@horus.com`;
 
-      if (firstName.length < 2 || lastName.length < 2) return json({ error: "invalid_name" }, 400);
-      if (!country || !/^\+[0-9]{1,4}$/.test(dialCode)) return json({ error: "invalid_country" }, 400);
-      if (!/^[a-z][a-z0-9._]{2,19}$/.test(emailHandle) || emailHandle === "admin") return json({ error: "invalid_email" }, 400);
-      if (password !== confirmPassword || passwordScore(password) < 3) return json({ error: "invalid_password" }, 400);
+      if (firstName.length < 2 || firstName.length > 60 || lastName.length < 2 || lastName.length > 60) return json({ error: "invalid_name" }, 400);
+      if (!country || country.length > 60 || phone.length > 18 || !/^\\+[0-9]{1,4}$/.test(dialCode)) return json({ error: "invalid_country" }, 400);
+      if (rawEmailHandle !== emailHandle || !/^[a-z][a-z0-9._]{2,19}$/.test(emailHandle) || emailHandle === "admin") return json({ error: "invalid_email" }, 400);
+      if (password.length > 256 || password !== confirmPassword || passwordScore(password) < 3) return json({ error: "invalid_password" }, 400);
 
       let existing;
       try {
