@@ -3071,8 +3071,8 @@ private fun LegalScreen(title: String, onBack: () -> Unit) {
     val sections = if (isPrivacy) {
         listOf(
             localizedUiText("بيانات الحساب", "Account information") to localizedUiText(
-                "عند إنشاء الحساب، نعالج الاسم الأول والأخير ورقم الهاتف والبلد ورمز الاتصال ومعرّف بريد Horus. لا تُخزَّن كلمة المرور كنص صريح؛ يُنشأ لها تحقق باستخدام PBKDF2 مع قيمة salt فريدة.",
-                "When you register, the service processes your first and last name, phone number, country, dial code, and Horus email handle. Passwords are not stored as plain text; a PBKDF2 verifier is stored with a unique salt."
+                "عند إنشاء الحساب، نعالج الاسم الأول والأخير ورقم الهاتف والبلد ورمز الاتصال ومعرّف Horus المستخدم لتسجيل الدخول، وهو ليس صندوق بريد. لا تُخزَّن كلمة المرور كنص صريح؛ يُنشأ لها تحقق باستخدام PBKDF2 مع قيمة salt فريدة.",
+                "When you register, the service processes your first and last name, phone number, country, dial code, and Horus sign-in ID. It is not an email inbox. Passwords are not stored as plain text; a PBKDF2 verifier is stored with a unique salt."
             ),
             localizedUiText("الموقع والبحث", "Location and search") to localizedUiText(
                 "تستخدم الخريطة إذن الموقع لتحديد مكانك. تُحفظ آخر إحداثيات والمفضلات على جهازك. عند البحث عن الأماكن أو العناوين أو المسارات، قد تُرسل إحداثياتك أو نص البحث إلى خدمات OpenStreetMap وOverpass وNominatim وPhoton وValhalla وArcGIS لتقديم النتائج.",
