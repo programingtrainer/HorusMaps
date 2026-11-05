@@ -769,8 +769,8 @@ private fun nearbyPlaceIcon(category: String): String = when (category.lowercase
     "supermarket", "convenience", "mall" -> "▦"
     "hotel", "hostel" -> "⌂"
     "atm", "bank" -> "▣"
-    "place_of_worship" -> "🕌"
-    "station", "railway" -> "🚉"
+    "place_of_worship", "mosque", "masjid" -> "🕌"
+    "station", "railway", "train_station" -> "🚉"
     else -> "•"
 }
 
@@ -2137,27 +2137,39 @@ private fun DashboardScreen(accountName: String) {
                             loadContinentBoundaries(style)
                             map.addOnMapClickListener { tappedPoint ->
                                 val screenPoint = map.projection.toScreenLocation(tappedPoint)
-                                val hit = map.queryRenderedFeatures(
-                                    screenPoint,
-                                    "horus-nearby-icon-layer",
-                                    "horus-nearby-layer"
-                                ).firstOrNull()
+                                val nativePoiLayers = map.style?.getLayers()
+                                    ?.map { it.id }
+                                    ?.filter { layerId ->
+                                        layerId.contains("poi", ignoreCase = true) ||
+                                            layerId.contains("station", ignoreCase = true) ||
+                                            layerId.contains("transit", ignoreCase = true)
+                                    }.orEmpty()
+                                val queryLayers = (listOf("horus-nearby-icon-layer", "horus-nearby-layer") + nativePoiLayers)
+                                    .distinct().toTypedArray()
+                                val hit = runCatching {
+                                    map.queryRenderedFeatures(screenPoint, *queryLayers).firstOrNull()
+                                }.getOrNull()
                                 if (hit != null) {
                                     val properties = hit.properties()
-                                    val hitName = properties?.get("name")?.asString.orEmpty()
-                                    val hitCategory = properties?.get("category")?.asString.orEmpty()
+                                    val hitName = listOf("name", "name:ar", "name:en", "name:latin")
+                                        .firstNotNullOfOrNull { key -> properties?.get(key)?.asString?.takeIf { it.isNotBlank() } }
+                                        .orEmpty()
+                                    val hitCategory = listOf("category", "amenity", "shop", "leisure", "tourism", "railway", "subclass", "class")
+                                        .firstNotNullOfOrNull { key -> properties?.get(key)?.asString?.takeIf { it.isNotBlank() } }
+                                        .orEmpty()
                                     selectedPlace = nearbyPlaces.firstOrNull {
                                         it.name == hitName && it.category == hitCategory
                                     } ?: run {
                                         val geometry = hit.geometry() as? org.maplibre.geojson.Point
-                                        geometry?.let {
-                                            NearbyPlace(
-                                                hitName.ifBlank { localizedUiText("مكان", "Place") },
-                                                it.latitude(),
-                                                it.longitude(),
-                                                hitCategory
-                                            )
-                                        }
+                                        val point = geometry ?: org.maplibre.geojson.Point.fromLngLat(
+                                            tappedPoint.longitude, tappedPoint.latitude
+                                        )
+                                        NearbyPlace(
+                                            hitName.ifBlank { localizedUiText("مكان", "Place") },
+                                            point.latitude(),
+                                            point.longitude(),
+                                            hitCategory
+                                        )
                                     }
                                     if (selectedPlace != null) {
                                         routeOptions = emptyList()
