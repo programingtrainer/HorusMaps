@@ -2273,25 +2273,31 @@ private fun DashboardScreen(accountName: String) {
                     }
                     if (nearbyPlaces.isNotEmpty()) {
                         val reference = currentLocation ?: mapLibreMap?.cameraPosition?.target
-                        nearbyPlaces.take(3).forEach { place ->
-                            Row(
-                                Modifier.fillMaxWidth().clickable {
-                                    selectedPlace = place
-                                    routeOptions = emptyList()
-                                    routeMessage = ""
-                                    mapLibreMap?.animateCamera(
-                                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                                            org.maplibre.android.geometry.LatLng(place.latitude, place.longitude), 15.5
-                                        ), 420
-                                    )
-                                }.padding(vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                        nearbyPlaces.take(3).forEachIndexed { index, place ->
+                            AnimatedVisibility(
+                                visible = true,
+                                enter = fadeIn(tween(240, delayMillis = index * 60)) +
+                                    expandVertically(tween(240, delayMillis = index * 60))
                             ) {
-                                Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 13.sp)
-                                Spacer(Modifier.width(7.dp))
-                                Text(place.name, color = Navy, fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
-                                if (reference != null) {
-                                    Text(formatRouteDistance(straightLineMeters(reference, org.maplibre.android.geometry.LatLng(place.latitude, place.longitude))), color = Color(0xFF667085), fontSize = 9.sp)
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        selectedPlace = place
+                                        routeOptions = emptyList()
+                                        routeMessage = ""
+                                        mapLibreMap?.animateCamera(
+                                            org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                                                org.maplibre.android.geometry.LatLng(place.latitude, place.longitude), 15.5
+                                            ), 420
+                                        )
+                                    }.padding(vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(nearbyPlaceIcon(place.category), color = Blue, fontSize = 13.sp)
+                                    Spacer(Modifier.width(7.dp))
+                                    Text(place.name, color = Navy, fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                                    if (reference != null) {
+                                        Text(formatRouteDistance(straightLineMeters(reference, org.maplibre.android.geometry.LatLng(place.latitude, place.longitude))), color = Color(0xFF667085), fontSize = 9.sp)
+                                    }
                                 }
                             }
                         }
