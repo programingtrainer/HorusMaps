@@ -897,6 +897,19 @@ private data class RouteOption(
     val details: String = ""
 )
 
+private val routeOptionsCache =
+    java.util.concurrent.ConcurrentHashMap<String, Pair<Long, RouteOption>>()
+
+private fun routeCacheKey(
+    origin: org.maplibre.android.geometry.LatLng,
+    destination: org.maplibre.android.geometry.LatLng,
+    mode: String
+): String = mode + ":" +
+    "%.4f".format(java.util.Locale.US, origin.latitude) + "," +
+    "%.4f".format(java.util.Locale.US, origin.longitude) + ":" +
+    "%.4f".format(java.util.Locale.US, destination.latitude) + "," +
+    "%.4f".format(java.util.Locale.US, destination.longitude)
+
 private fun decodePolyline6(encoded: String): List<org.maplibre.geojson.Point> {
     val points = ArrayList<org.maplibre.geojson.Point>()
     var index = 0
@@ -930,6 +943,8 @@ private fun requestValhallaRoute(
     destination: org.maplibre.android.geometry.LatLng,
     costing: String
 ): RouteOption {
+    val cacheKey = routeCacheKey(origin, destination, costing)
+    routeOptionsCache[cacheKey]?.takeIf { System.currentTimeMillis() - it.first < 60_000L }?.let { return it.second }
     val request = org.json.JSONObject()
         .put("locations", org.json.JSONArray()
             .put(org.json.JSONObject().put("lat", origin.latitude).put("lon", origin.longitude))
@@ -971,13 +986,15 @@ private fun requestValhallaRoute(
             }
         }
         if (allPoints.size < 2) throw IllegalStateException("Route geometry is unavailable")
-        return RouteOption(
+        val result = RouteOption(
             mode = costing,
             distanceMeters = summary.optDouble("length") * 1000.0,
             durationSeconds = summary.optDouble("time"),
             geometry = org.maplibre.geojson.LineString.fromLngLats(allPoints),
             instructions = instructions
         )
+        routeOptionsCache[cacheKey] = System.currentTimeMillis() to result
+        return result
     } finally {
         connection.disconnect()
     }
@@ -987,6 +1004,8 @@ private fun requestOsrmRoute(
     origin: org.maplibre.android.geometry.LatLng,
     destination: org.maplibre.android.geometry.LatLng
 ): RouteOption {
+    val cacheKey = routeCacheKey(origin, destination, "auto")
+    routeOptionsCache[cacheKey]?.takeIf { System.currentTimeMillis() - it.first < 60_000L }?.let { return it.second }
     val url = "https://router.project-osrm.org/route/v1/driving/" +
         origin.longitude + "," + origin.latitude + ";" + destination.longitude + "," + destination.latitude +
         "?overview=full&geometries=geojson"
@@ -1011,12 +1030,14 @@ private fun requestOsrmRoute(
             if (pair.length() < 2) null else org.maplibre.geojson.Point.fromLngLat(pair.getDouble(0), pair.getDouble(1))
         }
         if (points.size < 2) throw IllegalStateException("Driving route geometry unavailable")
-        return RouteOption(
+        val result = RouteOption(
             mode = "auto",
             distanceMeters = route.optDouble("distance"),
             durationSeconds = route.optDouble("duration"),
             geometry = org.maplibre.geojson.LineString.fromLngLats(points)
         )
+        routeOptionsCache[cacheKey] = System.currentTimeMillis() to result
+        return result
     } finally {
         connection.disconnect()
     }
