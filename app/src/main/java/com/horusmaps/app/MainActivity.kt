@@ -1556,7 +1556,7 @@ private fun DashboardScreen(accountName: String) {
         val deviceLocale = java.util.Locale.getDefault()
         val languageTag = deviceLocale.toLanguageTag()
         Thread {
-            runCatching { searchGeocodeWithFallback(query, languageTag) }            }.onSuccess { result ->
+            runCatching { searchGeocodeWithFallback(query, languageTag) }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     searching = false
                     searchMessage = result.optString("display_name", query)
