@@ -121,7 +121,8 @@ export default {
       try {
         const existing = await env.Horus_maps.prepare("SELECT 1 FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
         return json({ available: !existing, email });
-      } catch {
+      } catch (error) {
+        console.error(JSON.stringify({ event: "email_check_failed", errorType: error?.name ?? "Error" }));
         return json({ available: false, reason: "database_unavailable" }, 503);
       }
     }
@@ -138,7 +139,8 @@ export default {
       let user;
       try {
         user = await env.Horus_maps.prepare("SELECT first_name, last_name, horus_email, password_salt, password_hash FROM users WHERE horus_email = ? LIMIT 1").bind(email).first();
-      } catch {
+      } catch (error) {
+        console.error(JSON.stringify({ event: "login_database_failed", errorType: error?.name ?? "Error" }));
         return json({ error: "database_unavailable" }, 503);
       }
       if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) return json({ error: "invalid_credentials" }, 401);
@@ -194,6 +196,7 @@ export default {
       } catch (error) {
         const message = String(error?.message ?? error);
         if (/unique constraint|already exists/i.test(message)) return json({ error: "email_taken" }, 409);
+        console.error(JSON.stringify({ event: "registration_insert_failed", errorType: error?.name ?? "Error" }));
         return json({ error: "database_insert_failed" }, 500);
       }
 
