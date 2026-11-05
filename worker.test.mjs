@@ -139,3 +139,50 @@ test("APK endpoint streams the binary and forwards byte-range requests", async (
     globalThis.fetch = originalFetch;
   }
 });
+
+test("nearby places endpoint validates input and returns normalized Overpass data", async () => {
+  const invalid = await worker.fetch(new Request("https://horus.test/api/places?lat=999&lon=31&category=health"), {});
+  assert.equal(invalid.status, 400);
+
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return new Response(JSON.stringify({ elements: [{ id: 1, tags: { name: "Test Hospital" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+  try {
+    const response = await worker.fetch(new Request(
+      "https://horus.test/api/places?lat=30.0444&lon=31.2357&category=health"
+    ), {});
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("cache-control"), /s-maxage=120/);
+    const data = await response.json();
+    assert.equal(data.elements[0].tags.name, "Test Hospital");
+    assert.equal(requests.length, 2);
+    assert.ok(requests.every(item => item.options.body.includes("around:5000,30.0444,31.2357")));
+    assert.ok(requests.every(item => item.options.body.includes("hospital|clinic|doctors|pharmacy")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("nearby places endpoint safely searches Arabic brand names", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = "";
+  globalThis.fetch = async (_url, options) => {
+    requestBody = options.body;
+    return new Response(JSON.stringify({ elements: [] }), { status: 200 });
+  };
+  try {
+    const response = await worker.fetch(new Request(
+      "https://horus.test/api/places?lat=24.7&lon=46.7&category=shopping&q=" + encodeURIComponent("بندة")
+    ), {});
+    assert.equal(response.status, 200);
+    assert.match(requestBody, /Panda\|بندة\|بنده/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
