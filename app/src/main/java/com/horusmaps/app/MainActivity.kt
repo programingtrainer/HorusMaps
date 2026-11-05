@@ -3061,11 +3061,59 @@ private fun LoginScreen(onBack: () -> Unit, onLoginSuccess: (String) -> Unit, on
 
 @Composable
 private fun LegalScreen(title: String, onBack: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) {
-        Column {
-            Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Navy)
-            Text(localizedUiText("سيتم إضافة المحتوى الكامل للسياسة والشروط في المرحلة التالية.", "The full Privacy Policy and Terms content will be added in a later update."), modifier = Modifier.padding(top = 18.dp), color = Color(0xFF667085))
-            Spacer(Modifier.weight(1f)); OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().height(54.dp)) { Text(localizedUiText("العودة", "Back")) }
+    val isPrivacy = title == localizedUiText("سياسة الخصوصية", "Privacy Policy")
+    val sections = if (isPrivacy) {
+        listOf(
+            localizedUiText("بيانات الحساب", "Account information") to localizedUiText(
+                "عند إنشاء الحساب، نعالج الاسم الأول والأخير ورقم الهاتف والبلد ورمز الاتصال ومعرّف بريد Horus. لا تُخزَّن كلمة المرور كنص صريح؛ يُنشأ لها تحقق باستخدام PBKDF2 مع قيمة salt فريدة.",
+                "When you register, the service processes your first and last name, phone number, country, dial code, and Horus email handle. Passwords are not stored as plain text; a PBKDF2 verifier is stored with a unique salt."
+            ),
+            localizedUiText("الموقع والبحث", "Location and search") to localizedUiText(
+                "تستخدم الخريطة إذن الموقع لتحديد مكانك. تُحفظ آخر إحداثيات والمفضلات على جهازك. عند البحث عن الأماكن أو العناوين أو المسارات، قد تُرسل إحداثياتك أو نص البحث إلى خدمات OpenStreetMap وOverpass وNominatim وPhoton وValhalla وArcGIS لتقديم النتائج.",
+                "The map uses location permission to find your position. Your last coordinates and favorites are stored on this device. Place, address, and route searches may send coordinates or search text to OpenStreetMap, Overpass, Nominatim, Photon, Valhalla, and ArcGIS to provide results."
+            ),
+            localizedUiText("أماكن تخزين البيانات", "Where data is stored") to localizedUiText(
+                "تُحفظ بيانات الحساب في قاعدة بيانات Cloudflare D1. ويُحفظ اسم الحساب والبريد وآخر موقع والمفضلات محليًا في تفضيلات التطبيق. لا تتوفر حاليًا ميزة حذف الحساب من داخل التطبيق.",
+                "Account records are stored in Cloudflare D1. The account display name, email, last location, and favorites are stored locally in app preferences. In-app account deletion is not currently available."
+            ),
+            localizedUiText("الخدمات الخارجية", "Third-party services") to localizedUiText(
+                "مزودو الخرائط والبحث والمسارات خدمات مستقلة، وقد تخضع البيانات التي تصل إليهم لسياسات الخصوصية الخاصة بهم. لا يتحكم Horus Maps في ممارساتهم.",
+                "Map, search, and routing providers are independent services. Data sent to them may be subject to their own privacy policies, which Horus Maps does not control."
+            )
+        )
+    } else {
+        listOf(
+            localizedUiText("دقة البيانات", "Data accuracy") to localizedUiText(
+                "تعتمد الأماكن وأسماؤها على بيانات خرائط مفتوحة قد تكون ناقصة أو قديمة. تحقق من معلومات المكان قبل الاعتماد عليها.",
+                "Places and names depend on open map data that may be incomplete or outdated. Verify place information before relying on it."
+            ),
+            localizedUiText("المسارات وأوقات الرحلات", "Routes and travel times") to localizedUiText(
+                "المسارات وأوقات القيادة والمشي تقديرية وتعتمد على مزودي بيانات خارجيين. لا تمثل أوقات ازدحام مباشرة أو مواعيد نقل مؤكدة أو حجزًا.",
+                "Routes and driving or walking times are estimates from third-party providers. They are not live traffic predictions, confirmed transit schedules, or bookings."
+            ),
+            localizedUiText("الاستخدام الآمن", "Safe use") to localizedUiText(
+                "استخدم التطبيق مع مراعاة قوانين المرور والسلامة. لا تتعامل مع معلومات الخريطة أو التوجيه باعتبارها بديلًا عن اللافتات الرسمية أو خدمات الطوارئ.",
+                "Use the app in accordance with traffic laws and safety requirements. Do not treat map or navigation information as a substitute for official road signs or emergency services."
+            )
+        )
+    }
+    Column(
+        Modifier.fillMaxSize().background(Color.White).padding(24.dp).verticalScroll(rememberScrollState())
+    ) {
+        Text(title, fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Navy)
+        Text(
+            localizedUiText("معلومات واضحة عن طريقة عمل التطبيق وحدود خدماته.", "A plain-language summary of how the app works and the limits of its services."),
+            modifier = Modifier.padding(top = 8.dp, bottom = 18.dp),
+            color = Color(0xFF667085),
+            fontSize = 12.sp
+        )
+        sections.forEach { (heading, body) ->
+            Text(heading, color = Navy, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 5.dp))
+            Text(body, color = Color(0xFF667085), fontSize = 12.sp, lineHeight = 19.sp)
+        }
+        Spacer(Modifier.height(24.dp))
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+            Text(localizedUiText("العودة", "Back"))
         }
     }
 }
