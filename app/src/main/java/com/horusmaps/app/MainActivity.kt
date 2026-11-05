@@ -164,7 +164,7 @@ class MainActivity : ComponentActivity() {
             val deviceLayoutDirection = if (android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault()) == android.view.View.LAYOUT_DIRECTION_RTL) LayoutDirection.Rtl else LayoutDirection.Ltr
 
             LaunchedEffect(Unit) {
-                delay(1_400)
+                delay(1_800)
                 val preferences = context.getSharedPreferences("horus_session", android.content.Context.MODE_PRIVATE)
                 val savedName = preferences.getString("account_name", "") ?: ""
                 accountName = savedName
@@ -1419,7 +1419,7 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
         }
     }
 
-    androidx.compose.runtime.DisposableEffect(hasLocationPermission) {
+    androidx.compose.runtime.DisposableEffect(hasLocationPermission, activeNavigation, hasFreshLocationFix) {
         if (!hasLocationPermission) {
             onDispose { }
         } else {
@@ -1457,9 +1457,10 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
                                 hasFreshLocationFix = true
                             }
                         }
-                        // A 10 m minimum distance can suppress every callback while the device is stationary.
-                        // Request a prompt fix with no distance threshold, then keep updates lightweight.
-                        manager.requestLocationUpdates(provider, 1_000L, 0f, listener, android.os.Looper.getMainLooper())
+                        // Obtain the first fix promptly; reduce GPS work after that unless turn-by-turn navigation is active.
+                        val updateInterval = if (activeNavigation || !hasFreshLocationFix) 1_000L else 5_000L
+                        val minimumDistance = if (activeNavigation || !hasFreshLocationFix) 0f else 10f
+                        manager.requestLocationUpdates(provider, updateInterval, minimumDistance, listener, android.os.Looper.getMainLooper())
                     }
                 }
             } catch (_: SecurityException) {
