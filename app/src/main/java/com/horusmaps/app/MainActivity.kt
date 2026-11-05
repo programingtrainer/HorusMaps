@@ -88,7 +88,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Hotel
+import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.LocalPharmacy
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Park
 import androidx.compose.material.icons.filled.Place
@@ -774,14 +776,16 @@ private fun SuccessScreen(accountName: String, onContinue: () -> Unit) {
 }
 
 private fun nearbyPlaceIcon(category: String): ImageVector = when (category.lowercase(java.util.Locale.ROOT)) {
-    "restaurant", "fast_food", "food_court", "cafe", "coffee" -> Icons.Filled.Restaurant
+    "restaurant", "fast_food", "food_court" -> Icons.Filled.Restaurant
+    "cafe", "coffee" -> Icons.Filled.LocalCafe
     "fuel" -> Icons.Filled.LocalGasStation
-    "hospital", "clinic", "doctors", "pharmacy" -> Icons.Filled.LocalHospital
+    "hospital", "clinic", "doctors" -> Icons.Filled.LocalHospital
+    "pharmacy" -> Icons.Filled.LocalPharmacy
     "park", "garden", "playground", "nature_reserve" -> Icons.Filled.Park
     "supermarket", "convenience", "mall", "department_store" -> Icons.Filled.ShoppingCart
     "hotel", "hostel", "motel", "guest_house" -> Icons.Filled.Hotel
     "atm", "bank" -> Icons.Filled.AccountBalance
-    "place_of_worship", "mosque", "masjid" -> Icons.Filled.Place
+    "place_of_worship", "mosque", "masjid" -> Icons.Filled.AccountBalance
     "station", "railway", "train_station", "halt", "tram_stop" -> Icons.Filled.Train
     else -> Icons.Filled.Place
 }
@@ -1619,7 +1623,6 @@ private fun DashboardScreen(accountName: String) {
                     "nwr(around:$radiusMeters,$lat,$lon)$filter$nameFilter;"
                 }
                 val query = "[out:json][timeout:25];($selectors);out center tags 100;"
-                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
                 val root = fetchPlacesFromOverpass(query)
                 val elements = root.optJSONArray("elements") ?: org.json.JSONArray()
                 val places = mutableListOf<Pair<NearbyPlace, Double>>()
