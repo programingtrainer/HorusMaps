@@ -1510,7 +1510,7 @@ private fun DashboardScreen(accountName: String) {
     }
 
     fun loadNearbyPlaces(category: String = selectedPoiCategory, searchTerm: String = "") {
-        val origin = mapLibreMap?.cameraPosition?.target ?: currentLocation
+        val origin = currentLocation ?: mapLibreMap?.cameraPosition?.target
         if (origin == null || loadingNearby) {
             if (origin == null) poiSearchMessage = localizedUiText("حدد موقعك أو حرّك الخريطة إلى المنطقة المطلوبة أولًا", "Set your location or move the map to the area you want to search")
             return
@@ -1541,9 +1541,13 @@ private fun DashboardScreen(accountName: String) {
                     )
                 }
                 val nameFilter = searchTerm.trim().takeIf { it.isNotBlank() }?.let { raw ->
-                    val safe = raw.trim().split(Regex("\\s+"))
-                        .filter { it.isNotBlank() }
-                        .joinToString(".*") { word -> word.filter { it.isLetterOrDigit() || it == '-' } }
+                    val safe = if (raw.contains("بندة") || raw.contains("بنده")) {
+                        "(Panda|بندة|بنده)"
+                    } else {
+                        raw.trim().split(Regex("\\s+"))
+                            .filter { it.isNotBlank() }
+                            .joinToString(".*") { word -> word.filter { it.isLetterOrDigit() || it == '-' } }
+                    }
                     """[~"^(name(:.*)?|brand(:.*)?|operator(:.*)?)$"~"$safe",i]"""
                 } ?: "[name]"
                 val selectors = categoryFilters.joinToString("") { filter ->
@@ -1581,6 +1585,7 @@ private fun DashboardScreen(accountName: String) {
                         tags.has("shop") -> tags.optString("shop")
                         tags.has("leisure") -> tags.optString("leisure")
                         tags.has("tourism") -> tags.optString("tourism")
+                        tags.has("railway") -> "railway"
                         else -> "place"
                     }
                     val place = NearbyPlace(name, placeLat, placeLon, categoryValue)
@@ -2255,7 +2260,7 @@ private fun DashboardScreen(accountName: String) {
                         Text(poiSearchMessage, color = Color(0xFF667085), fontSize = 9.sp, modifier = Modifier.padding(top = 3.dp), maxLines = 2)
                     }
                     if (nearbyPlaces.isNotEmpty()) {
-                        val reference = mapLibreMap?.cameraPosition?.target ?: currentLocation
+                        val reference = currentLocation ?: mapLibreMap?.cameraPosition?.target
                         nearbyPlaces.take(3).forEach { place ->
                             Row(
                                 Modifier.fillMaxWidth().clickable {
