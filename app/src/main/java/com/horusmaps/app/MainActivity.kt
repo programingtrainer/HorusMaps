@@ -2180,18 +2180,19 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
             return
         }
         selectedPlace = destination
+        val destinationPoint = org.maplibre.android.geometry.LatLng(destination.latitude, destination.longitude)
         loadingRoute = true
         routeMessage = localizedUiText("جارٍ حساب المسار...", "Calculating route...")
         Thread {
             runCatching {
-                requestFastDrivingRoute(origin, destination)
+                requestFastDrivingRoute(origin, destinationPoint)
             }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingRoute = false
                     routeOptions = listOf(result)
                     selectedRouteMode = "auto"
                     routeOriginPoint = origin
-                    routeDestinationPoint = destination
+                    routeDestinationPoint = destinationPoint
                     routeMessage = localizedUiText(
                         "المسافة " + formatRouteDistance(result.distanceMeters) + " • " + formatRouteDuration(result.durationSeconds),
                         "Distance " + formatRouteDistance(result.distanceMeters) + " • " + formatRouteDuration(result.durationSeconds)
@@ -2200,7 +2201,7 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
                     val style = mapLibreMap?.style
                     (style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(result.geometry)
                     mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                        org.maplibre.android.geometry.LatLng(destination.latitude, destination.longitude), 13.5
+                        destinationPoint, 13.5
                     ), 650)
                     selectedTab = localizedUiText("المسارات", "Routes")
                 }
