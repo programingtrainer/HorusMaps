@@ -879,6 +879,9 @@ private data class NearbyPlace(
     val category: String
 )
 
+private val nearbyPlacesCache =
+    java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<NearbyPlace>>>()
+
 private data class RouteGeocodeResult(
     val point: org.maplibre.android.geometry.LatLng,
     val supportsFlight: Boolean
@@ -938,42 +941,114 @@ private fun requestValhallaRoute(
         .put("directions_type", "instructions")
     val connection = java.net.URL("https://valhalla1.openstreetmap.de/route")
         .openConnection() as java.net.HttpURLConnection
-    connection.requestMethod = "POST"
-    connection.connectTimeout = 15000
-    connection.readTimeout = 30000
-    connection.doOutput = true
-    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-    connection.setRequestProperty("Accept", "application/json")
-    connection.setRequestProperty("X-Client-Id", "HorusMaps")
-    connection.outputStream.use { it.write(request.toString().toByteArray(Charsets.UTF_8)) }
-    val responseCode = connection.responseCode
-    val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
-    val body = stream.bufferedReader().use { it.readText() }
-    if (responseCode !in 200..299) throw IllegalStateException("Routing service error ($responseCode)")
-    val root = org.json.JSONObject(body)
-    val trip = root.optJSONObject("trip") ?: throw IllegalStateException("No route found")
-    val summary = trip.optJSONObject("summary") ?: throw IllegalStateException("No route summary")
-    val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("No route geometry")
-    val allPoints = ArrayList<org.maplibre.geojson.Point>()
-    val instructions = ArrayList<String>()
-    for (i in 0 until legs.length()) {
-        val leg = legs.getJSONObject(i)
-        val shape = leg.optString("shape")
-        if (shape.isNotBlank()) allPoints.addAll(decodePolyline6(shape))
-        val maneuvers = leg.optJSONArray("maneuvers") ?: org.json.JSONArray()
-        for (j in 0 until maneuvers.length()) {
-            val instruction = maneuvers.optJSONObject(j)?.optString("instruction").orEmpty()
-            if (instruction.isNotBlank()) instructions.add(instruction)
+    try {
+        connection.requestMethod = "POST"
+        connection.connectTimeout = 4_500
+        connection.readTimeout = 8_000
+        connection.doOutput = true
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        connection.setRequestProperty("Accept", "application/json")
+        connection.setRequestProperty("X-Client-Id", "HorusMaps")
+        connection.outputStream.use { it.write(request.toString().toByteArray(Charsets.UTF_8)) }
+        val responseCode = connection.responseCode
+        val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+        val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (responseCode !in 200..299) throw IllegalStateException("Routing service error (" + responseCode + ")")
+        val root = org.json.JSONObject(body)
+        val trip = root.optJSONObject("trip") ?: throw IllegalStateException("No route found")
+        val summary = trip.optJSONObject("summary") ?: throw IllegalStateException("No route summary")
+        val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("No route geometry")
+        val allPoints = ArrayList<org.maplibre.geojson.Point>()
+        val instructions = ArrayList<String>()
+        for (i in 0 until legs.length()) {
+            val leg = legs.getJSONObject(i)
+            val shape = leg.optString("shape")
+            if (shape.isNotBlank()) allPoints.addAll(decodePolyline6(shape))
+            val maneuvers = leg.optJSONArray("maneuvers") ?: org.json.JSONArray()
+            for (j in 0 until maneuvers.length()) {
+                val instruction = maneuvers.optJSONObject(j)?.optString("instruction").orEmpty()
+                if (instruction.isNotBlank()) instructions.add(instruction)
+            }
         }
+        if (allPoints.size < 2) throw IllegalStateException("Route geometry is unavailable")
+        return RouteOption(
+            mode = costing,
+            distanceMeters = summary.optDouble("length") * 1000.0,
+            durationSeconds = summary.optDouble("time"),
+            geometry = org.maplibre.geojson.LineString.fromLngLats(allPoints),
+            instructions = instructions
+        )
+    } finally {
+        connection.disconnect()
     }
-    if (allPoints.size < 2) throw IllegalStateException("Route geometry is unavailable")
-    return RouteOption(
-        mode = costing,
-        distanceMeters = summary.optDouble("length") * 1000.0,
-        durationSeconds = summary.optDouble("time"),
-        geometry = org.maplibre.geojson.LineString.fromLngLats(allPoints),
-        instructions = instructions
-    )
+}
+
+private fun requestOsrmRoute(
+    origin: org.maplibre.android.geometry.LatLng,
+    destination: org.maplibre.android.geometry.LatLng
+): RouteOption {
+    val url = "https://router.project-osrm.org/route/v1/driving/" +
+        origin.longitude + "," + origin.latitude + ";" + destination.longitude + "," + destination.latitude +
+        "?overview=full&geometries=geojson"
+    val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+    try {
+        connection.connectTimeout = 4_500
+        connection.readTimeout = 8_000
+        connection.setRequestProperty("Accept", "application/json")
+        connection.setRequestProperty("User-Agent", "HorusMaps/1.0")
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val root = org.json.JSONObject(stream?.bufferedReader()?.use { it.readText() }.orEmpty())
+        if (code !in 200..299 || root.optString("code") != "Ok") {
+            throw IllegalStateException("Driving route provider unavailable")
+        }
+        val route = root.optJSONArray("routes")?.optJSONObject(0)
+            ?: throw IllegalStateException("No driving route found")
+        val coordinates = route.optJSONObject("geometry")?.optJSONArray("coordinates")
+            ?: throw IllegalStateException("Driving route geometry unavailable")
+        val points = (0 until coordinates.length()).mapNotNull { index ->
+            val pair = coordinates.optJSONArray(index) ?: return@mapNotNull null
+            if (pair.length() < 2) null else org.maplibre.geojson.Point.fromLngLat(pair.getDouble(0), pair.getDouble(1))
+        }
+        if (points.size < 2) throw IllegalStateException("Driving route geometry unavailable")
+        return RouteOption(
+            mode = "auto",
+            distanceMeters = route.optDouble("distance"),
+            durationSeconds = route.optDouble("duration"),
+            geometry = org.maplibre.geojson.LineString.fromLngLats(points)
+        )
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun requestFastDrivingRoute(
+    origin: org.maplibre.android.geometry.LatLng,
+    destination: org.maplibre.android.geometry.LatLng
+): RouteOption {
+    val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+    try {
+        val completion = java.util.concurrent.ExecutorCompletionService<RouteOption>(executor)
+        completion.submit(java.util.concurrent.Callable { requestOsrmRoute(origin, destination) })
+        completion.submit(java.util.concurrent.Callable { requestValhallaRoute(origin, destination, "auto") })
+        var remaining = 2
+        var lastError: Throwable? = null
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+        while (remaining > 0) {
+            val waitNanos = deadline - System.nanoTime()
+            if (waitNanos <= 0) break
+            val completed = completion.poll(waitNanos, java.util.concurrent.TimeUnit.NANOSECONDS) ?: break
+            remaining--
+            try {
+                return completed.get()
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        throw IllegalStateException("تعذر الوصول إلى خدمة حساب المسارات. حاول مرة أخرى.", lastError)
+    } finally {
+        executor.shutdownNow()
+    }
 }
 
 private fun straightLineMeters(a: org.maplibre.android.geometry.LatLng, b: org.maplibre.android.geometry.LatLng): Double {
@@ -1097,40 +1172,52 @@ private fun searchGeocodeWithFallback(query: String, languageTag: String): org.j
 private fun fetchPlacesFromOverpass(query: String): org.json.JSONObject {
     val endpoints = listOf(
         "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter"
+        "https://overpass.kumi.systems/api/interpreter"
     )
-    var lastError: Throwable? = null
-    endpoints.forEach { endpoint ->
-        var connection: java.net.HttpURLConnection? = null
-        try {
-            connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 9_000
-                readTimeout = 18_000
-                doOutput = true
-                setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-            }
-            val payload = "data=" + java.net.URLEncoder.encode(query, "UTF-8")
-            connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code in 200..299) return org.json.JSONObject(body)
-            lastError = IllegalStateException("HTTP $code")
-            if (code !in listOf(429, 500, 502, 503, 504)) throw lastError!!
-        } catch (error: Throwable) {
-            lastError = error
-        } finally {
-            connection?.disconnect()
+    val executor = java.util.concurrent.Executors.newFixedThreadPool(endpoints.size)
+    try {
+        val completion = java.util.concurrent.ExecutorCompletionService<org.json.JSONObject>(executor)
+        endpoints.forEach { endpoint ->
+            completion.submit(java.util.concurrent.Callable {
+                val connection = java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection
+                try {
+                    connection.requestMethod = "POST"
+                    connection.connectTimeout = 4_500
+                    connection.readTimeout = 8_000
+                    connection.doOutput = true
+                    connection.setRequestProperty("User-Agent", "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)")
+                    connection.setRequestProperty("Accept", "application/json")
+                    connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                    val payload = "data=" + java.net.URLEncoder.encode(query, "UTF-8")
+                    connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                    val code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    if (code !in 200..299) throw IllegalStateException("Overpass HTTP " + code)
+                    org.json.JSONObject(body)
+                } finally {
+                    connection.disconnect()
+                }
+            })
         }
+        var remaining = endpoints.size
+        var lastError: Throwable? = null
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+        while (remaining > 0) {
+            val waitNanos = deadline - System.nanoTime()
+            if (waitNanos <= 0) break
+            val completed = completion.poll(waitNanos, java.util.concurrent.TimeUnit.NANOSECONDS) ?: break
+            remaining--
+            try {
+                return completed.get()
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        throw IllegalStateException("Nearby places providers are temporarily unavailable", lastError)
+    } finally {
+        executor.shutdownNow()
     }
-    throw IllegalStateException(
-        "Nearby places providers are temporarily unavailable",
-        lastError
-    )
 }
 
 private fun getJson(urlText: String, userAgent: String = "HorusMaps/1.0 (https://github.com/programingtrainer/HorusMaps)"): org.json.JSONObject {
@@ -1785,6 +1872,22 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
         // A new request supersedes any older request; slow providers must never lock the UI.
         val requestId = nearbyRequestId + 1
         nearbyRequestId = requestId
+        val cacheKey = "%.3f".format(java.util.Locale.US, origin.latitude) + ":" +
+            "%.3f".format(java.util.Locale.US, origin.longitude) + ":" + category + ":" +
+            searchTerm.trim().lowercase(java.util.Locale.ROOT)
+        val cachedPlaces = nearbyPlacesCache[cacheKey]
+            ?.takeIf { System.currentTimeMillis() - it.first < 120_000L }
+            ?.second
+        if (cachedPlaces != null) {
+            nearbyPlaces = cachedPlaces
+            loadingNearby = false
+            poiSearchMessage = localizedUiText(
+                "أقرب " + cachedPlaces.size + " نتيجة من البيانات المحفوظة مؤقتًا.",
+                "Showing " + cachedPlaces.size + " nearby results from the recent cache."
+            )
+            updatePointSource("horus-nearby-source", cachedPlaces)
+            return
+        }
         loadingNearby = true
         poiSearchMessage = localizedUiText("جارٍ البحث عن الأماكن القريبة...", "Searching nearby places...")
         Thread {
@@ -1823,7 +1926,7 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
                 val selectors = categoryFilters.joinToString("") { filter ->
                     "nwr(around:$radiusMeters,$lat,$lon)$filter$nameFilter;"
                 }
-                val query = "[out:json][timeout:25];($selectors);out center tags 100;"
+                val query = "[out:json][timeout:10];($selectors);out center tags 60;"
                 val root = fetchPlacesFromOverpass(query)
                 val elements = root.optJSONArray("elements") ?: org.json.JSONArray()
                 val places = mutableListOf<Pair<NearbyPlace, Double>>()
@@ -1857,6 +1960,7 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
                     .take(60)
                     .map { it.first }
             }.onSuccess { places ->
+                nearbyPlacesCache[cacheKey] = System.currentTimeMillis() to places
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     if (requestId != nearbyRequestId) return@post
                     nearbyPlaces = places
@@ -2000,11 +2104,30 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
                 val destination = destinationResult.point
                 val options = ArrayList<RouteOption>()
                 val failures = ArrayList<String>()
-                // Each land mode is attempted for every geocoded destination, including countries and regions.
-                try { options.add(requestValhallaRoute(origin, destination, "auto")) }
-                catch (_: Exception) { failures.add(localizedUiText("لا يوجد مسار سيارة بري متصل أو تعذر حسابه", "No connected road route was found, or car routing failed")) }
-                try { options.add(requestValhallaRoute(origin, destination, "pedestrian")) }
-                catch (_: Exception) { failures.add(localizedUiText("لا يوجد مسار مشي بري متصل أو تعذر حسابه", "No connected walking route was found, or pedestrian routing failed")) }
+                // Car and walking requests run concurrently so the slowest provider does not delay both results.
+                val routeExecutor = java.util.concurrent.Executors.newFixedThreadPool(2)
+                try {
+                    val carFuture = routeExecutor.submit<RouteOption> { requestFastDrivingRoute(origin, destination) }
+                    val walkFuture = routeExecutor.submit<RouteOption> { requestValhallaRoute(origin, destination, "pedestrian") }
+                    val carRoute = try {
+                        carFuture.get(10, java.util.concurrent.TimeUnit.SECONDS)
+                    } catch (_: Exception) {
+                        carFuture.cancel(true)
+                        failures.add(localizedUiText("تعذر حساب مسار السيارة", "Driving route unavailable"))
+                        null
+                    }
+                    val walkRoute = try {
+                        walkFuture.get(10, java.util.concurrent.TimeUnit.SECONDS)
+                    } catch (_: Exception) {
+                        walkFuture.cancel(true)
+                        failures.add(localizedUiText("تعذر حساب مسار المشي", "Walking route unavailable"))
+                        null
+                    }
+                    carRoute?.let { options.add(it) }
+                    walkRoute?.let { options.add(it) }
+                } finally {
+                    routeExecutor.shutdownNow()
+                }
 
                 // Air travel is only offered for intercity-scale trips with a verified airport pair.
                 if (originResult.supportsFlight && destinationResult.supportsFlight) {
@@ -2096,34 +2219,24 @@ private fun DashboardScreen(accountName: String, onLogout: () -> Unit) {
         routeMessage = localizedUiText("جارٍ حساب المسار...", "Calculating route...")
         Thread {
             runCatching {
-                val url = java.net.URL(
-                    "https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson"
-                )
-                val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 12000
-                connection.readTimeout = 20000
-                val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                val routes = root.optJSONArray("routes") ?: throw IllegalStateException(localizedUiText("لم يتم العثور على مسار", "No route was found"))
-                if (routes.length() == 0) throw IllegalStateException(localizedUiText("لم يتم العثور على مسار", "No route was found"))
-                val route = routes.getJSONObject(0)
-                val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
-                val points = (0 until coordinates.length()).map { index ->
-                    val pair = coordinates.getJSONArray(index)
-                    org.maplibre.geojson.Point.fromLngLat(pair.getDouble(0), pair.getDouble(1))
-                }
-                val distanceKm = route.optDouble("distance") / 1000.0
-                val durationMin = route.optDouble("duration") / 60.0
-                Pair(org.maplibre.geojson.LineString.fromLngLats(points), localizedUiText("المسافة ${"%.1f".format(java.util.Locale.US, distanceKm)} كم • ${durationMin.toInt()} دقيقة تقريبًا", "Distance ${"%.1f".format(java.util.Locale.US, distanceKm)} km • about ${durationMin.toInt()} min"))
+                requestFastDrivingRoute(origin, destination)
             }.onSuccess { result ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     loadingRoute = false
-                    routeMessage = result.second
-                    currentRoute = result.first
+                    routeOptions = listOf(result)
+                    selectedRouteMode = "auto"
+                    routeOriginPoint = origin
+                    routeDestinationPoint = destination
+                    routeMessage = localizedUiText(
+                        "المسافة " + formatRouteDistance(result.distanceMeters) + " • " + formatRouteDuration(result.durationSeconds),
+                        "Distance " + formatRouteDistance(result.distanceMeters) + " • " + formatRouteDuration(result.durationSeconds)
+                    )
+                    currentRoute = result.geometry
                     val style = mapLibreMap?.style
-                    (style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(result.first)
+                    (style?.getSource("horus-route-source") as? org.maplibre.android.style.sources.GeoJsonSource)?.setGeoJson(result.geometry)
                     mapLibreMap?.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
                         org.maplibre.android.geometry.LatLng(destination.latitude, destination.longitude), 13.5
-                    ))
+                    ), 650)
                     selectedTab = localizedUiText("المسارات", "Routes")
                 }
             }.onFailure {
