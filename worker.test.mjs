@@ -162,8 +162,9 @@ test("nearby places endpoint validates input and returns normalized Overpass dat
     const data = await response.json();
     assert.equal(data.elements[0].tags.name, "Test Hospital");
     assert.equal(requests.length, 2);
-    assert.ok(requests.every(item => item.options.body.includes("around:5000,30.0444,31.2357")));
-    assert.ok(requests.every(item => item.options.body.includes("hospital|clinic|doctors|pharmacy")));
+    const queries = requests.map(item => new URLSearchParams(item.options.body).get("data"));
+    assert.ok(queries.every(query => query.includes("around:5000,30.0444,31.2357")));
+    assert.ok(queries.every(query => query.includes("hospital|clinic|doctors|pharmacy")));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -173,7 +174,7 @@ test("nearby places endpoint safely searches Arabic brand names", async () => {
   const originalFetch = globalThis.fetch;
   let requestBody = "";
   globalThis.fetch = async (_url, options) => {
-    requestBody = options.body;
+    requestBody = new URLSearchParams(options.body).get("data") || "";
     return new Response(JSON.stringify({ elements: [] }), { status: 200 });
   };
   try {
